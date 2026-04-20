@@ -1,0 +1,154 @@
+# ---------------------------------------------------------------------------
+# MayaBridge  -- selection & mesh utilities
+# ---------------------------------------------------------------------------
+class MayaBridge(object):
+
+    @staticmethod
+    def get_selected_meshes():
+        """
+        Returns mesh shapes from current selection, including all descendants.
+        Excludes intermediate objects.
+        """
+        if not MAYA_AVAILABLE:
+            return []
+        sel = cmds.ls(selection=True, long=True) or []
+        shapes = []
+        seen = set()
+        for node in sel:
+            try:
+                nt = cmds.nodeType(node)
+            except Exception:
+                continue
+            if nt == "mesh":
+                if node in seen:
+                    continue
+                try:
+                    if cmds.getAttr(node + ".intermediateObject"):
+                        continue
+                except Exception:
+                    pass
+                shapes.append(node)
+                seen.add(node)
+            elif nt == "transform":
+                ch = cmds.listRelatives(
+                    node, allDescendents=True,
+                    type="mesh", fullPath=True) or []
+                for s in ch:
+                    if s in seen:
+                        continue
+                    try:
+                        if cmds.getAttr(s + ".intermediateObject"):
+                            continue
+                    except Exception:
+                        pass
+                    shapes.append(s)
+                    seen.add(s)
+        return shapes
+
+    @staticmethod
+    def get_short_name(long_name):
+        parts = long_name.split("|")
+        return parts[-1] if parts else long_name
+
+    @staticmethod
+    def get_transform(shape_name):
+        """Returns the parent transform of a shape (long path)."""
+        if not MAYA_AVAILABLE:
+            return shape_name
+        parents = cmds.listRelatives(shape_name, parent=True, fullPath=True) or []
+        return parents[0] if parents else shape_name
+
+    @staticmethod
+    def get_vertex_positions_world(mesh_shape):
+        """
+        Returns a list of (x, y, z) tuples for each vertex in world space.
+        """
+        if not MAYA_AVAILABLE:
+            return []
+        sel = om.MSelectionList()
+        sel.add(mesh_shape)
+        dag = om.MDagPath()
+        sel.getDagPath(0, dag)
+        try:
+            dag.extendToShape()
+        except Exception:
+            pass
+        fn = om.MFnMesh(dag)
+        pts = om.MPointArray()
+        fn.getPoints(pts, om.MSpace.kWorld)
+        out = []
+        n = pts.length()
+        for i in range(n):
+            p = pts[i]
+            out.append((p.x, p.y, p.z))
+        return out
+
+    @staticmethod
+    def set_vertex_positions_world(mesh_shape, positions):
+        """
+        Overwrites the mesh vertex positions in world space.
+        positions: list of (x, y, z) with len == mesh vertex count.
+        """
+        if not MAYA_AVAILABLE:
+            return
+        sel = om.MSelectionList()
+        sel.add(mesh_shape)
+        dag = om.MDagPath()
+        sel.getDagPath(0, dag)
+        try:
+            dag.extendToShape()
+        except Exception:
+            pass
+        fn = om.MFnMesh(dag)
+        arr = om.MPointArray()
+        arr.setLength(len(positions))
+        for i, p in enumerate(positions):
+            arr.set(om.MPoint(float(p[0]), float(p[1]), float(p[2]), 1.0), i)
+        fn.setPoints(arr, om.MSpace.kWorld)
+
+    @staticmethod
+    def get_face_vertex_counts(mesh_shape):
+        """Returns list where entry i = vertex count of polygon i."""
+        if not MAYA_AVAILABLE:
+            return []
+        sel = om.MSelectionList()
+        sel.add(mesh_shape)
+        dag = om.MDagPath()
+        sel.getDagPath(0, dag)
+        try:
+            dag.extendToShape()
+        except Exception:
+            pass
+        fn = om.MFnMesh(dag)
+        n_poly = fn.numPolygons()
+        out = []
+        verts = om.MIntArray()
+        for i in range(n_poly):
+            fn.getPolygonVertices(i, verts)
+            out.append(verts.length())
+        return out
+
+    @staticmethod
+    def get_polygon_vertices(mesh_shape):
+        """Returns list of lists: [[v0,v1,v2,v3], [v0,v1,v2], ...]
+        with vertex indices for each polygon face in order."""
+        if not MAYA_AVAILABLE:
+            return []
+        sel = om.MSelectionList()
+        sel.add(mesh_shape)
+        dag = om.MDagPath()
+        sel.getDagPath(0, dag)
+        try:
+            dag.extendToShape()
+        except Exception:
+            pass
+        fn = om.MFnMesh(dag)
+        n_poly = fn.numPolygons()
+        verts = om.MIntArray()
+        out = []
+        for i in range(n_poly):
+            fn.getPolygonVertices(i, verts)
+            out.append([verts[k] for k in range(verts.length())])
+        return out
+
+

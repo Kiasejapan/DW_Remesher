@@ -1,0 +1,146 @@
+def _url_read(url, timeout=10):
+    """Read a URL and return the decoded string. Py2/3 compatible."""
+    if PY2:
+        import urllib2
+        resp = urllib2.urlopen(url, timeout=timeout)
+        data = resp.read()
+    else:
+        import urllib.request
+        resp = urllib.request.urlopen(url, timeout=timeout)
+        data = resp.read()
+    if isinstance(data, bytes):
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
+    return data
+
+
+def _extract_remote_version(source_text):
+    """Extract 'VERSION = "..."' line from source code."""
+    import re
+    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', source_text, re.MULTILINE)
+    return m.group(1) if m else None
+
+
+def check_for_updates(silent=False):
+    """
+    Check GitHub for a newer version.
+
+    silent=False (default, interactive):
+        Shows dialogs. If a newer version is available, asks the user
+        to download and installs it to Maya scripts folder.
+
+    silent=True (background check at startup):
+        Never shows any dialog. Only returns a state string.
+
+    Returns:
+        'latest'          — local version matches remote (up to date)
+        'newer_available' — remote has a newer version
+        'unknown'         — offline, parse error, or Maya not available
+    """
+    if not MAYA_AVAILABLE:
+        return "unknown"
+
+    # Fetch remote source
+    try:
+        source = _url_read(_GITHUB_RAW_URL, timeout=5 if silent else 10)
+    except Exception as e:
+        if not silent:
+            QtWidgets.QMessageBox.warning(
+                None, "Update Check",
+                "Failed to connect to GitHub.\n{0}".format(str(e)))
+        return "unknown"
+
+    remote_ver = _extract_remote_version(source)
+    if not remote_ver:
+        if not silent:
+            QtWidgets.QMessageBox.warning(
+                None, "Update Check",
+                "Could not read remote version.")
+        return "unknown"
+
+    local_ver = VERSION
+
+    if remote_ver == local_ver:
+        if not silent:
+            QtWidgets.QMessageBox.information(
+                None, "Update Check",
+                u"\u6700\u65b0\u7248\u3067\u3059\u3002\n"
+                u"Version: {0}".format(local_ver))
+        return "latest"
+
+    # Lexical comparison works for YYYY.MM.DD.HHMM format
+    is_newer = remote_ver > local_ver
+
+    if not is_newer:
+        # Local is ahead of remote (dev state). Treat as up to date.
+        if not silent:
+            msg = (u"\u30ed\u30fc\u30ab\u30eb\u7248\u306e\u65b9\u304c\u65b0"
+                   u"\u3057\u3044\u3088\u3046\u3067\u3059\u3002\n\n"
+                   u"Local:  {0}\nRemote: {1}").format(local_ver, remote_ver)
+            QtWidgets.QMessageBox.information(None, "Update Check", msg)
+        return "latest"
+
+    # A newer remote version exists
+    if silent:
+        return "newer_available"
+
+    # Interactive: ask to download
+    msg = (u"\u65b0\u3057\u3044\u30d0\u30fc\u30b8\u30e7\u30f3\u304c\u3042"
+           u"\u308a\u307e\u3059\u3002\n\n"
+           u"Local:  {0}\nRemote: {1}\n\n"
+           u"\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u3057\u3066\u66f4\u65b0"
+           u"\u3057\u307e\u3059\u304b\uff1f").format(local_ver, remote_ver)
+    reply = QtWidgets.QMessageBox.question(
+        None, "Update Check", msg,
+        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+    if reply != QtWidgets.QMessageBox.Yes:
+        return "newer_available"
+
+    # Save to Maya scripts folder
+    try:
+        scripts_dir = cmds.internalVar(userScriptDir=True)
+        if scripts_dir.endswith("/") or scripts_dir.endswith("\\"):
+            scripts_dir = scripts_dir[:-1]
+        dest = os.path.join(scripts_dir, "DW_Remesher.py")
+
+        # Backup existing
+        if os.path.exists(dest):
+            bak = dest + ".bak"
+            if os.path.exists(bak):
+                try:
+                    os.remove(bak)
+                except Exception:
+                    pass
+            try:
+                os.rename(dest, bak)
+            except Exception:
+                pass
+
+        if PY2:
+            with open(dest, "wb") as f:
+                f.write(source.encode("utf-8"))
+        else:
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(source)
+
+        done_msg = (u"v{0} \u306b\u66f4\u65b0\u3057\u307e\u3057\u305f\u3002\n\n"
+                    u"\u4fdd\u5b58\u5148: {1}\n\n"
+                    u"\u30c4\u30fc\u30eb\u3092\u518d\u8d77\u52d5\u3057\u3066"
+                    u"\u304f\u3060\u3055\u3044\u3002\n"
+                    u"(\u30e1\u30a4\u30f3\u30a6\u30a3\u30f3\u30c9\u30a6\u306e"
+                    u"\u30ea\u30ed\u30fc\u30c9\u30dc\u30bf\u30f3\u3092\u30af"
+                    u"\u30ea\u30c3\u30af)").format(remote_ver, dest)
+        QtWidgets.QMessageBox.information(None, "Update Check", done_msg)
+        return "latest"  # after update, local matches remote
+    except Exception as e:
+        QtWidgets.QMessageBox.warning(
+            None, "Update Check",
+            "Failed to save update.\n{0}".format(str(e)))
+        return "newer_available"
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------

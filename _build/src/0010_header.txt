@@ -1,0 +1,47 @@
+# -*- coding: utf-8 -*-
+"""
+DW_Remesher.py
+Cylinder cleanup / resides tool for Maya 2018-2025
+Python 2.7 / 3.x compatible
+"""
+from __future__ import print_function, division, absolute_import
+import sys
+import os
+import math
+
+# Version is rewritten by build.py at every build
+# Format: YYYY.MM.DD.HHMM
+VERSION = "2026.04.20.0447"
+
+# GitHub raw file URL for auto-update
+_GITHUB_RAW_URL = "https://raw.githubusercontent.com/Kiasejapan/DW_Remesher/main/DW_Remesher.py"
+
+PY2 = sys.version_info[0] == 2
+
+# Python 2/3 compatible reload
+if PY2:
+    _reload = reload   # noqa: F821  (builtin in Py2)
+else:
+    import importlib
+    _reload = importlib.reload
+
+try:
+    import maya.cmds as cmds
+    import maya.OpenMaya as om
+    import maya.OpenMayaUI as omui
+    MAYA_AVAILABLE = True
+except ImportError:
+    MAYA_AVAILABLE = False
+
+try:
+    from PySide2 import QtWidgets, QtCore, QtGui
+    from shiboken2 import wrapInstance
+except ImportError:
+    try:
+        from PySide6 import QtWidgets, QtCore, QtGui
+        from shiboken6 import wrapInstance
+    except ImportError:
+        from PySide import QtWidgets, QtCore, QtGui
+        from shiboken import wrapInstance
+
+

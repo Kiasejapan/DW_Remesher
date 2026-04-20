@@ -1,0 +1,32 @@
+def show():
+    global _saved_geometry, _saved_lang, _current_lang
+
+    # Close existing instance
+    for w in QtWidgets.QApplication.allWidgets():
+        if isinstance(w, RemesherToolWindow):
+            w.close()
+            w.deleteLater()
+
+    if _saved_lang:
+        _current_lang = _saved_lang
+        _saved_lang = None
+
+    win = RemesherToolWindow()
+    win.show()
+
+    # Background version check. Delayed so the UI shows immediately
+    # and the user never waits for the network. Never blocks or fails.
+    try:
+        QtCore.QTimer.singleShot(500, win._startup_version_check)
+    except Exception:
+        pass
+
+    return win
+
+
+if __name__ == "__main__":
+    # Standalone test (outside Maya)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    win = show()
+    app.exec_()
+

@@ -1,0 +1,179 @@
+# ---------------------------------------------------------------------------
+# Cylinder Analyzer
+# ---------------------------------------------------------------------------
+# Given a mesh shape, determine:
+#   - principal axis (or user-specified axis)
+#   - ring structure (groups of vertices at similar axis position)
+#   - per-ring center and mean/median radius
+#   - number of sides (most common ring-vertex-count)
+# This information is shared by both Cleanup and Change-Sides operations.
+# ---------------------------------------------------------------------------
+
+_AXIS_WORLD = {
+    "x": (1.0, 0.0, 0.0),
+    "y": (0.0, 1.0, 0.0),
+    "z": (0.0, 0.0, 1.0),
+}
+
+
+def _compute_ring_radii_and_center(vert_ids, positions, axis_origin, axis_dir):
+    """Helper: for a set of vertex indices assumed to lie in a ring around
+    axis, return (center_point_on_axis, mean_radius, median_radius, radii_list)."""
+    ts = []
+    for i in vert_ids:
+        p = positions[i]
+        d = _vsub(p, axis_origin)
+        ts.append(_vdot(d, axis_dir))
+    t_mean = sum(ts) / len(ts)
+    center = _vadd(axis_origin, _vmul(axis_dir, t_mean))
+    radii = []
+    for i in vert_ids:
+        p = positions[i]
+        d = _vsub(p, center)
+        t_comp = _vdot(d, axis_dir)
+        perp = _vsub(d, _vmul(axis_dir, t_comp))
+        radii.append(_vlen(perp))
+    mean_r = sum(radii) / len(radii) if radii else 0.0
+    med_r = _median(radii)
+    return center, mean_r, med_r, radii, t_mean
+
+
+def analyze_cylinder(mesh_shape, axis_choice="auto"):
+    """
+    Analyze a mesh as a cylinder.
+
+    axis_choice : "auto" | "x" | "y" | "z"   (local-space axis selection)
+
+    Returns a dict:
+        {
+          "axis":       (ux, uy, uz) unit vector in world space,
+          "origin":     (ox, oy, oz) a point on axis (the vertex centroid),
+          "rings":      [ {verts, t, center, mean_r, median_r, radii} ... ],
+                        sorted ascending by t,
+          "sides":      int, detected side count (mode of ring sizes),
+          "positions":  [(x,y,z) ...] per vertex, world space,
+          "cap_vert_ids": set(int) -- vertices that don't fit any ring,
+          "ring_tolerance": float used for clustering,
+        }
+    or None if the mesh can't be analyzed as a cylinder.
+    """
+    if not MAYA_AVAILABLE:
+        return None
+
+    positions = MayaBridge.get_vertex_positions_world(mesh_shape)
+    if len(positions) < 6:
+        return None
+
+    # ---- Determine axis ----
+    if axis_choice == "auto":
+        axis, origin = _pca_principal_axis(positions)
+    else:
+        local_axis = _AXIS_WORLD.get(axis_choice.lower(), (0.0, 1.0, 0.0))
+        # Transform the local-space axis into world space via the
+        # transform node's world matrix.
+        try:
+            xform = MayaBridge.get_transform(mesh_shape)
+            mtx = cmds.xform(xform, query=True, matrix=True, worldSpace=True)
+            # matrix order in Maya: row-major 4x4, axis basis vectors at
+            # [0:3]=X, [4:7]=Y, [8:11]=Z
+            lax = local_axis
+            wx = (mtx[0] * lax[0] + mtx[4] * lax[1] + mtx[8]  * lax[2])
+            wy = (mtx[1] * lax[0] + mtx[5] * lax[1] + mtx[9]  * lax[2])
+            wz = (mtx[2] * lax[0] + mtx[6] * lax[1] + mtx[10] * lax[2])
+            axis = _vnorm((wx, wy, wz))
+        except Exception:
+            axis = _vnorm(local_axis)
+        origin = _centroid(positions)
+
+    if _vlen(axis) < 0.5:
+        return None
+
+    # ---- Project onto axis, find extent ----
+    t_values = [_project_onto_axis(p, origin, axis) for p in positions]
+    t_min = min(t_values)
+    t_max = max(t_values)
+    extent = t_max - t_min
+    if extent < _EPS:
+        return None
+
+    # ---- Cluster verts into rings by axis position ----
+    # Use an adaptive tolerance: start at 0.5% of extent, grow if we don't
+    # produce enough multi-vertex rings (mesh might be very dense along axis).
+    tol = max(extent * 0.005, 1e-6)
+
+    # Sort vertex indices by t
+    order = sorted(range(len(positions)), key=lambda i: t_values[i])
+    rings = [[order[0]]]
+    ref_t = t_values[order[0]]
+    for idx in order[1:]:
+        if abs(t_values[idx] - ref_t) < tol:
+            rings[-1].append(idx)
+        else:
+            rings.append([idx])
+        # Always update ref to the latest entry so drift works
+        ref_t = t_values[idx]
+
+    # Keep rings of size >= 3 (can't define a circle with fewer)
+    side_rings = [r for r in rings if len(r) >= 3]
+    if len(side_rings) < 2:
+        return None
+
+    # Detect side count = mode of ring sizes
+    sizes = [len(r) for r in side_rings]
+    # Mode
+    size_counts = {}
+    for s in sizes:
+        size_counts[s] = size_counts.get(s, 0) + 1
+    mode_sides = max(size_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+    # Keep only rings whose size matches mode (ignore odd-sized rings,
+    # those are likely noise / caps with subdivided fans)
+    valid_rings = [r for r in side_rings if len(r) == mode_sides]
+    if len(valid_rings) < 2:
+        return None
+
+    # Compute ring details
+    ring_details = []
+    for r in valid_rings:
+        center, mean_r, med_r, radii, t_mean = _compute_ring_radii_and_center(
+            r, positions, origin, axis)
+        ring_details.append({
+            "verts":    r,
+            "t":        t_mean,
+            "center":   center,
+            "mean_r":   mean_r,
+            "median_r": med_r,
+            "radii":    radii,
+        })
+
+    # Sort rings ascending by t
+    ring_details.sort(key=lambda rd: rd["t"])
+
+    # Collect cap verts (those not in any valid ring)
+    ring_vert_set = set()
+    for rd in ring_details:
+        ring_vert_set.update(rd["verts"])
+    cap_verts = set(range(len(positions))) - ring_vert_set
+
+    return {
+        "axis":           axis,
+        "origin":         origin,
+        "rings":          ring_details,
+        "sides":          mode_sides,
+        "positions":      positions,
+        "cap_vert_ids":   cap_verts,
+        "ring_tolerance": tol,
+    }
+
+
+def _axis_name_from_vector(axis, tol=0.05):
+    """Return 'X', 'Y', 'Z', or '~' (arbitrary) depending on axis direction."""
+    ax, ay, az = abs(axis[0]), abs(axis[1]), abs(axis[2])
+    if ax > 1 - tol:
+        return "X"
+    if ay > 1 - tol:
+        return "Y"
+    if az > 1 - tol:
+        return "Z"
+    return u"~"   # non-aligned
+

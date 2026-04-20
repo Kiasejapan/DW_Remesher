@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# Cylinder Cleanup
+# ---------------------------------------------------------------------------
+# Non-destructive: only vertex positions are modified. Topology and UVs
+# are preserved.
+# Modes:
+#   "full"   -> equalize angular spacing AND radii per ring  (perfectly regular)
+#   "radius" -> equalize radii per ring, keep original angles
+# Radius policy:
+#   "mean"   -> use per-ring mean radius
+#   "median" -> use per-ring median (robust to outlier verts)
+# ---------------------------------------------------------------------------
+
+def _compute_ring_angles(ring_verts, positions, center, u_vec, v_vec):
+    """Return per-vertex angle (radians, -pi..pi) around the ring center
+    using the (u, v) basis that is perpendicular to the cylinder axis."""
+    out = []
+    for i in ring_verts:
+        p = positions[i]
+        d = _vsub(p, center)
+        du = _vdot(d, u_vec)
+        dv = _vdot(d, v_vec)
+        out.append(math.atan2(dv, du))
+    return out
+
+
+def cleanup_cylinder(analysis, mesh_shape, mode="full", radius_policy="mean"):
+    """
+    Apply cleanup to the mesh based on the pre-computed analysis.
+    Returns (ring_count, side_count).
+    """
+    if analysis is None:
+        return None
+
+    axis = analysis["axis"]
+    origin = analysis["origin"]
+    u_vec, v_vec = _build_orthonormal_basis(axis)
+    positions = list(analysis["positions"])  # copy
+    new_positions = list(positions)
+
+    for ring in analysis["rings"]:
+        center = ring["center"]
+        verts  = ring["verts"]
+        N = len(verts)
+        if N < 3:
+            continue
+
+        target_r = (ring["median_r"]
+                    if radius_policy == "median"
+                    else ring["mean_r"])
+
+        # Per-vertex angle in the ring plane
+        angles = _compute_ring_angles(verts, positions, center, u_vec, v_vec)
+
+        if mode == "full":
+            # Sort vertices by angle, then assign evenly-spaced angles in
+            # sorted order. Use the smallest angle as base so the ring is
+            # anchored to its original orientation (prevents rotation jumps).
+            order = sorted(range(N), key=lambda k: angles[k])
+            base_angle = angles[order[0]]
+            for pos, k in enumerate(order):
+                new_angle = base_angle + 2.0 * math.pi * pos / N
+                new_p = _vadd(
+                    center,
+                    _vadd(_vmul(u_vec, target_r * math.cos(new_angle)),
+                          _vmul(v_vec, target_r * math.sin(new_angle))))
+                new_positions[verts[k]] = new_p
+        else:
+            # Radius-only: keep each vertex's original angle, force radius
+            for k in range(N):
+                a = angles[k]
+                new_p = _vadd(
+                    center,
+                    _vadd(_vmul(u_vec, target_r * math.cos(a)),
+                          _vmul(v_vec, target_r * math.sin(a))))
+                new_positions[verts[k]] = new_p
+
+    # Cap center vertices (vertices not in any detected ring) are snapped
+    # to the axis line at their original t-projection so the n-gon-fan cap
+    # centers sit nicely on the axis.
+    for i in analysis["cap_vert_ids"]:
+        p = positions[i]
+        d = _vsub(p, origin)
+        t = _vdot(d, axis)
+        new_positions[i] = _vadd(origin, _vmul(axis, t))
+
+    MayaBridge.set_vertex_positions_world(mesh_shape, new_positions)
+    return (len(analysis["rings"]), analysis["sides"])
+

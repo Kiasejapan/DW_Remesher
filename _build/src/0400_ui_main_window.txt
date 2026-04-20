@@ -1,0 +1,268 @@
+# ---------------------------------------------------------------------------
+# RemesherToolWindow  (Main UI)
+# ---------------------------------------------------------------------------
+_MAIN_SS = (
+    "QDialog{background-color:#333}"
+    "QScrollArea{border:none;background-color:transparent}"
+    "QScrollBar:vertical{background:#2B2B2B;width:10px}"
+    "QScrollBar::handle:vertical{background:#555;border-radius:4px}"
+    "QGroupBox{border-radius:6px;background-color:#2E2E2E;margin-top:6px}"
+    "QGroupBox::title{subcontrol-origin:margin;left:10px;"
+    "color:#EEE;font-size:11px;font-weight:bold}"
+    "QLabel{color:#EEE}"
+)
+
+
+class RemesherToolWindow(QtWidgets.QDialog):
+
+    def __init__(self, parent=None):
+        if parent is None and MAYA_AVAILABLE:
+            try:
+                ptr = omui.MQtUtil.mainWindow()
+                if PY2:
+                    parent = wrapInstance(long(ptr), QtWidgets.QWidget)  # noqa: F821
+                else:
+                    parent = wrapInstance(int(ptr), QtWidgets.QWidget)
+            except Exception:
+                pass
+
+        super(RemesherToolWindow, self).__init__(parent)
+        self.setObjectName("DW_Remesher_Main")
+        self.setWindowTitle(tr("window_title"))
+        self.setMinimumWidth(420)
+        self.setMinimumHeight(440)
+        self.resize(440, 520)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.Tool)
+        self.setStyleSheet(_MAIN_SS)
+
+        self._build()
+
+        if _saved_geometry:
+            x, y, w, h = _saved_geometry
+            self.setGeometry(x, y, w, h)
+        else:
+            self.adjustSize()
+
+    # ------------------------------------------------------------------
+    def _build(self):
+        main_lo = QtWidgets.QVBoxLayout(self)
+        main_lo.setContentsMargins(8, 8, 8, 8)
+        main_lo.setSpacing(4)
+
+        # ---- Header bar ----
+        header = QtWidgets.QHBoxLayout()
+        header.setSpacing(4)
+
+        self._title_lbl = QtWidgets.QLabel(
+            u"<b>{0}</b> <span style='color:#888;font-size:10px'>v{1}</span>".format(
+                tr("window_title"), VERSION))
+        self._title_lbl.setStyleSheet("color:#EEE;font-size:14px;padding:4px")
+        header.addWidget(self._title_lbl)
+        header.addStretch()
+
+        reload_btn = QtWidgets.QPushButton(u"\u21BB")
+        reload_btn.setFixedSize(28, 24)
+        reload_btn.setToolTip(tr("btn_reload"))
+        reload_btn.setStyleSheet(
+            "QPushButton{background-color:#555;color:#EEE;"
+            "border:1px solid #777;border-radius:3px;font-size:14px}"
+            "QPushButton:hover{background-color:#4CAF50}")
+        reload_btn.clicked.connect(self._on_reload)
+        header.addWidget(reload_btn)
+
+        # Update button
+        self._update_btn = QtWidgets.QPushButton(u"\u2B07")
+        self._update_btn.setFixedSize(28, 24)
+        self._update_btn.setToolTip(tr("btn_update"))
+        self._update_btn.clicked.connect(self._on_check_update)
+        header.addWidget(self._update_btn)
+        self._set_update_btn_state("unknown")
+
+        # Help button
+        help_btn = QtWidgets.QPushButton("?")
+        help_btn.setFixedSize(24, 24)
+        help_btn.setStyleSheet(
+            "QPushButton{background-color:#555;color:#EEE;"
+            "border:1px solid #777;border-radius:3px;font-size:12px;font-weight:bold}"
+            "QPushButton:hover{background-color:#2196F3}")
+        help_btn.clicked.connect(self._open_help)
+        header.addWidget(help_btn)
+
+        # Language toggle
+        self._lang_btn = QtWidgets.QPushButton(tr("btn_lang"))
+        self._lang_btn.setFixedSize(36, 24)
+        self._lang_btn.setStyleSheet(
+            "QPushButton{background-color:#555;color:#EEE;"
+            "border:1px solid #777;border-radius:3px;font-size:10px;font-weight:bold}"
+            "QPushButton:hover{background-color:#607D8B}")
+        self._lang_btn.clicked.connect(self._toggle_lang)
+        header.addWidget(self._lang_btn)
+
+        main_lo.addLayout(header)
+
+        # ---- Tab widget (single tab: Cylinder) ----
+        self._tabs = QtWidgets.QTabWidget()
+        self._tabs.setStyleSheet(
+            "QTabWidget::pane{border:1px solid #444;background-color:#2B2B2B;"
+            "border-radius:4px;top:-1px}"
+            "QTabBar::tab{background-color:#3C3C3C;color:#CCC;padding:6px 16px;"
+            "border:1px solid #444;border-bottom:none;"
+            "border-top-left-radius:4px;border-top-right-radius:4px;"
+            "font-size:10px}"
+            "QTabBar::tab:selected{background-color:#2B2B2B;color:#FFF;"
+            "border-color:#2196F3}"
+            "QTabBar::tab:hover{background-color:#4A4A4A}")
+
+        # ---- Cylinder tab ----
+        cyl_tab = QtWidgets.QWidget()
+        cyl_tab_lo = QtWidgets.QVBoxLayout(cyl_tab)
+        cyl_tab_lo.setContentsMargins(0, 0, 0, 0)
+        cyl_tab_lo.setSpacing(0)
+
+        cyl_scroll = QtWidgets.QScrollArea()
+        cyl_scroll.setWidgetResizable(True)
+        cyl_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        cyl_scroll_w = QtWidgets.QWidget()
+        scroll_lo = QtWidgets.QVBoxLayout(cyl_scroll_w)
+        scroll_lo.setContentsMargins(4, 4, 4, 4)
+        scroll_lo.setSpacing(8)
+
+        # Cleanup group
+        _cc_build_group(self, scroll_lo)
+        # Change-sides group
+        _rs_build_group(self, scroll_lo)
+
+        scroll_lo.addStretch()
+        cyl_scroll.setWidget(cyl_scroll_w)
+        cyl_tab_lo.addWidget(cyl_scroll)
+
+        self._tabs.addTab(cyl_tab, tr("tab_cylinder"))
+        main_lo.addWidget(self._tabs)
+
+        # ---- Status bar ----
+        self._status_bar = QtWidgets.QLabel(tr("status_ready"))
+        self._status_bar.setStyleSheet(
+            "color:#AAA;font-size:10px;padding:4px 6px;"
+            "background-color:#2B2B2B;border-top:1px solid #444")
+        self._status_bar.setMinimumHeight(22)
+        main_lo.addWidget(self._status_bar)
+
+    # ------------------------------------------------------------------
+    def _toggle_lang(self):
+        global _current_lang
+        _current_lang = LANG_JP if _current_lang == LANG_EN else LANG_EN
+        self._refresh_labels()
+
+    def _refresh_labels(self):
+        self._title_lbl.setText(
+            u"<b>{0}</b> <span style='color:#888;font-size:10px'>v{1}</span>".format(
+                tr("window_title"), VERSION))
+        self.setWindowTitle(tr("window_title"))
+        self._lang_btn.setText(tr("btn_lang"))
+        self._status_bar.setText(tr("status_ready"))
+        try:
+            self._tabs.setTabText(0, tr("tab_cylinder"))
+        except Exception:
+            pass
+        _cc_refresh_labels(self)
+        _rs_refresh_labels(self)
+
+    # ------------------------------------------------------------------
+    def _open_help(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(tr("help_title"))
+        dlg.setWindowFlags(dlg.windowFlags() | QtCore.Qt.Tool)
+        dlg.setMinimumSize(560, 520)
+        dlg.setStyleSheet(
+            "QDialog{background-color:#333}"
+            "QTextBrowser{background-color:#2B2B2B;color:#EEE;"
+            "border:1px solid #444;padding:8px;font-size:11px}"
+            "QTabWidget::pane{border:1px solid #444;background:#2B2B2B;top:-1px}"
+            "QTabBar::tab{background:#3C3C3C;color:#BBB;padding:6px 14px;"
+            "border:1px solid #444;border-bottom:none;margin-right:1px;"
+            "font-size:11px}"
+            "QTabBar::tab:selected{background:#2B2B2B;color:#EEE;font-weight:bold}")
+        lo = QtWidgets.QVBoxLayout(dlg)
+        lo.setContentsMargins(8, 8, 8, 8)
+        lo.setSpacing(6)
+        tabs = QtWidgets.QTabWidget()
+        tb = QtWidgets.QTextBrowser()
+        tb.setHtml(tr("help_body_cylinder"))
+        tb.setOpenExternalLinks(True)
+        tabs.addTab(tb, tr("tab_cylinder"))
+        lo.addWidget(tabs)
+        btn_lo = QtWidgets.QHBoxLayout()
+        btn_lo.addStretch()
+        close = _mkbtn(tr("btn_close"), 26, "#555", "#444")
+        close.clicked.connect(dlg.accept)
+        btn_lo.addWidget(close)
+        lo.addLayout(btn_lo)
+        dlg.exec_()
+
+    # ------------------------------------------------------------------
+    def _on_reload(self):
+        global _saved_geometry, _saved_lang
+        geo = self.geometry()
+        _saved_geometry = (geo.x(), geo.y(), geo.width(), geo.height())
+        _saved_lang = _current_lang
+        self.close()
+
+        mn = self.__class__.__module__
+        mod = sys.modules.get(mn)
+
+        if mod is None or mn == "__main__":
+            for name, m in list(sys.modules.items()):
+                if name == "__main__":
+                    continue
+                f = getattr(m, "__file__", None)
+                if f and "DW_Remesher" in f:
+                    mn = name
+                    mod = m
+                    break
+
+        if mod is not None and mn != "__main__":
+            _reload(mod)
+            mod._saved_geometry = _saved_geometry
+            mod._saved_lang = _saved_lang
+            mod.show()
+        else:
+            if "DW_Remesher" in sys.modules:
+                mod = sys.modules["DW_Remesher"]
+                _reload(mod)
+                mod._saved_geometry = _saved_geometry
+                mod._saved_lang = _saved_lang
+                mod.show()
+
+    # ------------------------------------------------------------------
+    def _on_check_update(self):
+        result = check_for_updates(silent=False)
+        self._set_update_btn_state(result)
+
+    def _set_update_btn_state(self, state):
+        if state == "newer_available":
+            bg = "#D32F2F"
+            hv = "#E53935"
+            tip = tr("btn_update") + " (NEW!)"
+        elif state == "latest":
+            bg = "#1976D2"
+            hv = "#2196F3"
+            tip = tr("btn_update") + " (up to date)"
+        else:
+            bg = "#555"
+            hv = "#9C27B0"
+            tip = tr("btn_update")
+        self._update_btn.setStyleSheet(
+            "QPushButton{{background-color:{0};color:#EEE;"
+            "border:1px solid #777;border-radius:3px;font-size:12px}}"
+            "QPushButton:hover{{background-color:{1}}}".format(bg, hv))
+        self._update_btn.setToolTip(tip)
+
+    def _startup_version_check(self):
+        try:
+            state = check_for_updates(silent=True)
+            self._set_update_btn_state(state)
+        except Exception:
+            self._set_update_btn_state("unknown")
+
+

@@ -1,0 +1,197 @@
+# ---------------------------------------------------------------------------
+# Cylinder -- Change Sides (N <-> M)
+# ---------------------------------------------------------------------------
+# Creates a NEW mesh that preserves the per-ring axis position and radius
+# of the source, but uses `target_sides` vertices per ring.
+# Optionally deletes the source ("replace") or keeps both ("duplicate").
+# UV layout is recreated via Maya's cylindrical projection.
+# ---------------------------------------------------------------------------
+
+def _axis_to_local_option(axis_world):
+    """Return best-guess world axis hint for cmds.polyProjection:
+    "X", "Y", or "Z" depending on the dominant component."""
+    ax, ay, az = abs(axis_world[0]), abs(axis_world[1]), abs(axis_world[2])
+    if ax >= ay and ax >= az:
+        return "X"
+    if ay >= ax and ay >= az:
+        return "Y"
+    return "Z"
+
+
+def resides_cylinder(analysis, mesh_shape, target_sides,
+                      create_caps=True, replace=False,
+                      preserve_uv=True):
+    """
+    Rebuild the selected cylinder with `target_sides` vertices per ring.
+
+    analysis      : dict returned by analyze_cylinder()
+    mesh_shape    : source mesh shape (long path)
+    target_sides  : int, 3..128
+    create_caps   : bool, add n-gon end caps
+    replace       : bool, delete original after build and take its name/parent
+    preserve_uv   : bool, apply cylindrical UV projection
+    Returns new transform long path.
+    """
+    if analysis is None:
+        raise RuntimeError("analysis is None")
+    if target_sides < 3 or target_sides > 128:
+        raise ValueError("target_sides must be in 3..128")
+
+    axis = analysis["axis"]
+    rings = analysis["rings"]
+    if len(rings) < 2:
+        raise RuntimeError("Need at least 2 rings to rebuild cylinder")
+
+    M = int(target_sides)
+    u_vec, v_vec = _build_orthonormal_basis(axis)
+
+    # Determine a consistent base angle so the generated mesh's "seam"
+    # lines up with the source's seam. Use the original first-ring's
+    # first-by-vertex-index vertex angle as reference.
+    first_ring = rings[0]
+    first_verts = first_ring["verts"]
+    base_vert_local_index = min(
+        range(len(first_verts)), key=lambda i: first_verts[i])
+    base_angle = _compute_ring_angles(
+        [first_verts[base_vert_local_index]], analysis["positions"],
+        first_ring["center"], u_vec, v_vec)[0]
+
+    # ---- Build new vertex list (world space) ----
+    new_verts = []
+    for ring in rings:
+        center = ring["center"]
+        r = ring["mean_r"]
+        for i in range(M):
+            a = base_angle + 2.0 * math.pi * i / M
+            p = _vadd(center,
+                      _vadd(_vmul(u_vec, r * math.cos(a)),
+                            _vmul(v_vec, r * math.sin(a))))
+            new_verts.append(p)
+
+    # ---- Build face connectivity ----
+    n_rings = len(rings)
+    faces = []
+    # Side quads: winding v[ri,si] -> v[ri,si+1] -> v[ri+1,si+1] -> v[ri+1,si]
+    for ri in range(n_rings - 1):
+        base_lo = ri * M
+        base_hi = (ri + 1) * M
+        for si in range(M):
+            a = base_lo + si
+            b = base_lo + (si + 1) % M
+            c = base_hi + (si + 1) % M
+            d = base_hi + si
+            faces.append([a, b, c, d])
+
+    # Caps: bottom (first ring) with reversed winding so normal points -axis;
+    # top (last ring) with natural winding so normal points +axis.
+    if create_caps:
+        bottom = list(range(M))
+        bottom.reverse()
+        top = [(n_rings - 1) * M + i for i in range(M)]
+        faces.append(bottom)
+        faces.append(top)
+
+    # ---- Create the mesh via OpenMaya ----
+    points = om.MPointArray()
+    points.setLength(len(new_verts))
+    for i, p in enumerate(new_verts):
+        points.set(om.MPoint(float(p[0]), float(p[1]), float(p[2]), 1.0), i)
+
+    face_counts = om.MIntArray()
+    face_connects = om.MIntArray()
+    for f in faces:
+        face_counts.append(len(f))
+        for v in f:
+            face_connects.append(int(v))
+
+    # Make a new transform node as parent for the mesh
+    src_transform = MayaBridge.get_transform(mesh_shape)
+    src_short = MayaBridge.get_short_name(src_transform)
+    new_name_hint = src_short + "_remeshed"
+
+    new_xform = cmds.createNode("transform", name=new_name_hint)
+    # Get MObject of that transform
+    sel = om.MSelectionList()
+    sel.add(new_xform)
+    parent_mo = om.MObject()
+    sel.getDependNode(0, parent_mo)
+
+    fn_mesh = om.MFnMesh()
+    try:
+        fn_mesh.create(
+            len(new_verts), len(faces),
+            points, face_counts, face_connects,
+            parent_mo,
+        )
+    except Exception as e:
+        # Clean up empty transform if creation failed
+        try:
+            cmds.delete(new_xform)
+        except Exception:
+            pass
+        raise RuntimeError("Failed to create mesh: " + str(e))
+
+    # The new mesh shape was parented under new_xform. Find it.
+    new_shapes = cmds.listRelatives(new_xform, shapes=True, fullPath=True) or []
+    if not new_shapes:
+        raise RuntimeError("Created mesh has no shape node")
+    new_shape = new_shapes[0]
+
+    # Assign default lambert shader
+    try:
+        cmds.sets(new_shape, edit=True, forceElement="initialShadingGroup")
+    except Exception:
+        pass
+
+    # ---- UV: cylindrical projection aligned to axis ----
+    if preserve_uv:
+        try:
+            axis_hint = _axis_to_local_option(axis)
+            # polyProjection -cm True -type Cylindrical
+            # -ibd True = insert before deformers (not needed for new mesh, but safe)
+            cmds.polyProjection(
+                new_shape + ".f[*]",
+                type="Cylindrical",
+                md=axis_hint,       # map direction (X, Y, or Z)
+                ch=False)
+        except Exception:
+            pass
+
+    # ---- Parent / naming ----
+    # Ensure new transform is at identity (verts were built in world space)
+    try:
+        cmds.xform(new_xform, worldSpace=True,
+                   translation=(0.0, 0.0, 0.0),
+                   rotation=(0.0, 0.0, 0.0),
+                   scale=(1.0, 1.0, 1.0))
+    except Exception:
+        pass
+
+    # Preserve hierarchy: place new_xform under the same parent as src_transform
+    src_parents = cmds.listRelatives(src_transform, parent=True, fullPath=True)
+    if src_parents:
+        try:
+            cmds.parent(new_xform, src_parents[0])
+        except Exception:
+            pass
+
+    final_xform = new_xform
+    if replace:
+        try:
+            # Collect original long name before deleting
+            original_name = MayaBridge.get_short_name(src_transform)
+            cmds.delete(src_transform)
+            final_xform = cmds.rename(new_xform, original_name)
+        except Exception:
+            # If delete/rename fails, leave the duplicated mesh in place
+            final_xform = new_xform
+
+    # Return the long path of the final transform
+    try:
+        final_long = cmds.ls(final_xform, long=True)
+        if final_long:
+            return final_long[0]
+    except Exception:
+        pass
+    return final_xform
+

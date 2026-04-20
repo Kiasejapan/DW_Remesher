@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Shared UI helpers & stylesheets
+# ---------------------------------------------------------------------------
+def _mkbtn(text, h, bg, hv, fs=11, parent=None):
+    b = QtWidgets.QPushButton(text, parent)
+    b.setFixedHeight(h)
+    b.setStyleSheet(
+        "QPushButton{{background-color:{bg};color:white;border:none;"
+        "border-radius:4px;font-size:{fs}px;font-weight:bold;padding:0 10px}}"
+        "QPushButton:hover{{background-color:{hv}}}"
+        "QPushButton:disabled{{background-color:#444;color:#666}}"
+        .format(bg=bg, hv=hv, fs=fs))
+    return b
+
+
+_DIALOG_SS = (
+    "QDialog{background-color:#333;color:#EEE}"
+    "QGroupBox{border:1px solid #555;border-radius:6px;"
+    "background-color:#2E2E2E;color:#EEE;margin-top:8px;padding-top:8px}"
+    "QGroupBox::title{subcontrol-origin:margin;left:8px}"
+    "QLabel{color:#EEE}"
+    "QCheckBox{color:#EEE}"
+    "QDoubleSpinBox,QSpinBox,QLineEdit{"
+    "background-color:#2B2B2B;color:#EEE;border:1px solid #555;"
+    "border-radius:3px;padding:2px}"
+    "QListWidget{background-color:#2B2B2B;color:#EEE;"
+    "border:1px solid #555;border-radius:3px}"
+    "QListWidget::item:selected{background-color:#1565C0}"
+)
+
+
+# Small grey label (used for form field labels)
+_LBL_SS = "color:#AAA;font-size:10px"
+
+# Read-only line edit ("pill")
+_FIELD_SS = ("QLineEdit{background-color:#2B2B2B;color:#EEE;"
+             "border:1px solid #555;border-radius:3px;"
+             "padding:2px 4px;font-size:10px}")
+
+# Spin box (int / double)
+_SPIN_SS = ("QDoubleSpinBox,QSpinBox{background-color:#2B2B2B;color:#EEE;"
+            "border:1px solid #555;border-radius:3px;"
+            "padding:1px;font-size:10px}")
+
+# [Set] selection-pickup button (grey)
+_SET_BTN_SS = ("QPushButton{background-color:#455A64;color:#EEE;"
+               "border:1px solid #607D8B;border-radius:3px;"
+               "font-size:10px;padding:2px 8px}"
+               "QPushButton:hover{background-color:#546E7A}")
+
+# Radio buttons (small neutral)
+_RADIO_SS = "QRadioButton{color:#CCC;font-size:10px}"
+
+# Small light-grey checkbox
+_CB_SS = ("QCheckBox{color:#CCC;font-size:10px}"
+          "QCheckBox::indicator{width:12px;height:12px}")
+
+

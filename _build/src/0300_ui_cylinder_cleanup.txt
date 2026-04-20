@@ -1,0 +1,264 @@
+# ---------------------------------------------------------------------------
+# Cylinder Cleanup UI  (Pattern C -- form)
+# ---------------------------------------------------------------------------
+# Attaches runtime state and widgets to the parent tool window as `_cc_*`.
+# Called from the main window build step.
+# ---------------------------------------------------------------------------
+
+
+def _cc_build_group(tool_window, parent_layout):
+    """Build the Cleanup form group and append to parent_layout."""
+    tool_window._cc_target_shape = None   # long path
+    tool_window._cc_last_analysis = None  # cached analysis dict
+
+    grp = QtWidgets.QGroupBox()
+    grp.setStyleSheet(
+        "QGroupBox{border:1px solid #2196F3;border-radius:6px;"
+        "background-color:#2E2E2E;margin-top:6px}"
+        "QGroupBox::title{subcontrol-origin:margin;left:10px;"
+        "color:#EEE;font-size:11px;font-weight:bold}")
+    lo = QtWidgets.QVBoxLayout(grp)
+    lo.setContentsMargins(8, 12, 8, 8)
+    lo.setSpacing(6)
+
+    # Header label
+    tool_window._cc_grp_lbl = QtWidgets.QLabel(
+        u"\u25A0 " + tr("cc_grp_title"))
+    tool_window._cc_grp_lbl.setStyleSheet(
+        "color:#2196F3;font-size:11px;font-weight:bold")
+    lo.addWidget(tool_window._cc_grp_lbl)
+
+    # Target row
+    row = QtWidgets.QHBoxLayout()
+    tool_window._cc_lbl_target = QtWidgets.QLabel(tr("cc_lbl_target"))
+    tool_window._cc_lbl_target.setStyleSheet(_LBL_SS)
+    tool_window._cc_lbl_target.setFixedWidth(110)
+    row.addWidget(tool_window._cc_lbl_target)
+    tool_window._cc_txt_target = QtWidgets.QLineEdit()
+    tool_window._cc_txt_target.setReadOnly(True)
+    tool_window._cc_txt_target.setStyleSheet(_FIELD_SS)
+    row.addWidget(tool_window._cc_txt_target)
+    tool_window._cc_btn_set = QtWidgets.QPushButton(tr("btn_set"))
+    tool_window._cc_btn_set.setStyleSheet(_SET_BTN_SS)
+    tool_window._cc_btn_set.setFixedWidth(50)
+    tool_window._cc_btn_set.clicked.connect(
+        lambda: _cc_set_target(tool_window))
+    row.addWidget(tool_window._cc_btn_set)
+    lo.addLayout(row)
+
+    # Info label (detected axis / rings / sides)
+    tool_window._cc_info_lbl = QtWidgets.QLabel(u"")
+    tool_window._cc_info_lbl.setStyleSheet(
+        "color:#888;font-size:10px;padding:2px 0 0 110px")
+    lo.addWidget(tool_window._cc_info_lbl)
+
+    # Separator
+    sep = QtWidgets.QFrame()
+    sep.setFrameShape(QtWidgets.QFrame.HLine)
+    sep.setStyleSheet("color:#555")
+    lo.addWidget(sep)
+
+    # Axis row
+    ax_row = QtWidgets.QHBoxLayout()
+    tool_window._cc_lbl_axis = QtWidgets.QLabel(tr("cc_lbl_axis"))
+    tool_window._cc_lbl_axis.setStyleSheet(_LBL_SS)
+    tool_window._cc_lbl_axis.setFixedWidth(110)
+    ax_row.addWidget(tool_window._cc_lbl_axis)
+    tool_window._cc_rb_auto = QtWidgets.QRadioButton(tr("cc_ax_auto"))
+    tool_window._cc_rb_x    = QtWidgets.QRadioButton("X")
+    tool_window._cc_rb_y    = QtWidgets.QRadioButton("Y")
+    tool_window._cc_rb_z    = QtWidgets.QRadioButton("Z")
+    tool_window._cc_rb_auto.setChecked(True)
+    ax_grp = QtWidgets.QButtonGroup(tool_window)
+    for rb in (tool_window._cc_rb_auto, tool_window._cc_rb_x,
+               tool_window._cc_rb_y, tool_window._cc_rb_z):
+        rb.setStyleSheet(_RADIO_SS)
+        ax_grp.addButton(rb)
+        ax_row.addWidget(rb)
+    ax_row.addStretch()
+    tool_window._cc_ax_group = ax_grp
+    for rb in (tool_window._cc_rb_auto, tool_window._cc_rb_x,
+               tool_window._cc_rb_y, tool_window._cc_rb_z):
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_refresh_preview(tw))
+    lo.addLayout(ax_row)
+
+    # Mode row
+    mo_row = QtWidgets.QHBoxLayout()
+    tool_window._cc_lbl_mode = QtWidgets.QLabel(tr("cc_lbl_mode"))
+    tool_window._cc_lbl_mode.setStyleSheet(_LBL_SS)
+    tool_window._cc_lbl_mode.setFixedWidth(110)
+    mo_row.addWidget(tool_window._cc_lbl_mode)
+    tool_window._cc_rb_mode_full = QtWidgets.QRadioButton(tr("cc_mode_full"))
+    tool_window._cc_rb_mode_rad  = QtWidgets.QRadioButton(tr("cc_mode_radius"))
+    tool_window._cc_rb_mode_full.setChecked(True)
+    mo_grp = QtWidgets.QButtonGroup(tool_window)
+    for rb in (tool_window._cc_rb_mode_full, tool_window._cc_rb_mode_rad):
+        rb.setStyleSheet(_RADIO_SS)
+        mo_grp.addButton(rb)
+        mo_row.addWidget(rb)
+    mo_row.addStretch()
+    tool_window._cc_mode_group = mo_grp
+    lo.addLayout(mo_row)
+
+    # Radius policy row
+    rp_row = QtWidgets.QHBoxLayout()
+    tool_window._cc_lbl_rpol = QtWidgets.QLabel(tr("cc_lbl_radius_avg"))
+    tool_window._cc_lbl_rpol.setStyleSheet(_LBL_SS)
+    tool_window._cc_lbl_rpol.setFixedWidth(110)
+    rp_row.addWidget(tool_window._cc_lbl_rpol)
+    tool_window._cc_rb_rpol_mean = QtWidgets.QRadioButton(tr("cc_radius_mean"))
+    tool_window._cc_rb_rpol_med  = QtWidgets.QRadioButton(tr("cc_radius_median"))
+    tool_window._cc_rb_rpol_mean.setChecked(True)
+    rpol_grp = QtWidgets.QButtonGroup(tool_window)
+    for rb in (tool_window._cc_rb_rpol_mean, tool_window._cc_rb_rpol_med):
+        rb.setStyleSheet(_RADIO_SS)
+        rpol_grp.addButton(rb)
+        rp_row.addWidget(rb)
+    rp_row.addStretch()
+    tool_window._cc_rpol_group = rpol_grp
+    lo.addLayout(rp_row)
+
+    # Apply button
+    btn_row = QtWidgets.QHBoxLayout()
+    btn_row.addStretch()
+    tool_window._cc_btn_apply = _mkbtn(tr("cc_btn_apply"), 28,
+                                       "#2196F3", "#1976D2")
+    tool_window._cc_btn_apply.setFixedWidth(140)
+    tool_window._cc_btn_apply.clicked.connect(
+        lambda: _cc_on_apply(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_apply)
+    btn_row.addStretch()
+    lo.addLayout(btn_row)
+
+    parent_layout.addWidget(grp)
+    return grp
+
+
+# ---------------------------------------------------------------------------
+# UI handlers
+# ---------------------------------------------------------------------------
+
+def _cc_set_status(tool_window, text):
+    if hasattr(tool_window, "_status_bar"):
+        tool_window._status_bar.setText(text)
+
+
+def _cc_current_axis_choice(tool_window):
+    if tool_window._cc_rb_x.isChecked(): return "x"
+    if tool_window._cc_rb_y.isChecked(): return "y"
+    if tool_window._cc_rb_z.isChecked(): return "z"
+    return "auto"
+
+
+def _cc_current_mode(tool_window):
+    if tool_window._cc_rb_mode_rad.isChecked():
+        return "radius"
+    return "full"
+
+
+def _cc_current_radius_policy(tool_window):
+    if tool_window._cc_rb_rpol_med.isChecked():
+        return "median"
+    return "mean"
+
+
+def _cc_set_target(tool_window):
+    if not MAYA_AVAILABLE:
+        return
+    shapes = MayaBridge.get_selected_meshes()
+    if not shapes:
+        tool_window._cc_target_shape = None
+        tool_window._cc_txt_target.setText(u"---")
+        tool_window._cc_info_lbl.setText(u"")
+        _cc_set_status(tool_window, tr("status_no_mesh"))
+        return
+    shape = shapes[0]
+    tool_window._cc_target_shape = shape
+    tool_window._cc_txt_target.setText(MayaBridge.get_short_name(
+        MayaBridge.get_transform(shape)))
+    _cc_set_status(tool_window, tr("status_target_set",
+                                   name=MayaBridge.get_short_name(shape)))
+    _cc_refresh_preview(tool_window)
+
+
+def _cc_refresh_preview(tool_window):
+    """Re-run analysis with current axis choice and update info label."""
+    if not tool_window._cc_target_shape:
+        tool_window._cc_info_lbl.setText(u"")
+        tool_window._cc_last_analysis = None
+        return
+    axis_choice = _cc_current_axis_choice(tool_window)
+    try:
+        analysis = analyze_cylinder(tool_window._cc_target_shape,
+                                    axis_choice=axis_choice)
+    except Exception:
+        analysis = None
+    tool_window._cc_last_analysis = analysis
+    if analysis is None:
+        tool_window._cc_info_lbl.setText(tr("status_not_cyl"))
+        return
+    ax_name = _axis_name_from_vector(analysis["axis"])
+    tool_window._cc_info_lbl.setText(tr(
+        "cc_info_detected",
+        axis=ax_name,
+        rings=len(analysis["rings"]),
+        sides=analysis["sides"]))
+
+
+def _cc_on_apply(tool_window):
+    if not MAYA_AVAILABLE:
+        return
+    if not tool_window._cc_target_shape:
+        _cc_set_status(tool_window, tr("status_target_not_set"))
+        return
+
+    axis_choice = _cc_current_axis_choice(tool_window)
+    try:
+        analysis = analyze_cylinder(tool_window._cc_target_shape,
+                                    axis_choice=axis_choice)
+    except Exception as e:
+        _cc_set_status(tool_window, tr("status_error", msg=str(e)))
+        return
+
+    if analysis is None:
+        _cc_set_status(tool_window, tr("status_not_cyl"))
+        return
+
+    mode = _cc_current_mode(tool_window)
+    rpol = _cc_current_radius_policy(tool_window)
+
+    cmds.undoInfo(openChunk=True, chunkName="DW_CylinderCleanup")
+    try:
+        rings_cnt, side_cnt = cleanup_cylinder(
+            analysis, tool_window._cc_target_shape,
+            mode=mode, radius_policy=rpol) or (0, 0)
+        ax_name = _axis_name_from_vector(analysis["axis"])
+        _cc_set_status(tool_window, tr(
+            "status_cleanup_done",
+            axis=ax_name, rings=rings_cnt, sides=side_cnt))
+        _cc_refresh_preview(tool_window)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        _cc_set_status(tool_window, tr("status_error", msg=str(e)))
+    finally:
+        cmds.undoInfo(closeChunk=True)
+
+
+def _cc_refresh_labels(tool_window):
+    if not hasattr(tool_window, "_cc_grp_lbl"):
+        return
+    tool_window._cc_grp_lbl.setText(u"\u25A0 " + tr("cc_grp_title"))
+    tool_window._cc_lbl_target.setText(tr("cc_lbl_target"))
+    tool_window._cc_btn_set.setText(tr("btn_set"))
+    tool_window._cc_lbl_axis.setText(tr("cc_lbl_axis"))
+    tool_window._cc_rb_auto.setText(tr("cc_ax_auto"))
+    tool_window._cc_lbl_mode.setText(tr("cc_lbl_mode"))
+    tool_window._cc_rb_mode_full.setText(tr("cc_mode_full"))
+    tool_window._cc_rb_mode_rad.setText(tr("cc_mode_radius"))
+    tool_window._cc_lbl_rpol.setText(tr("cc_lbl_radius_avg"))
+    tool_window._cc_rb_rpol_mean.setText(tr("cc_radius_mean"))
+    tool_window._cc_rb_rpol_med.setText(tr("cc_radius_median"))
+    tool_window._cc_btn_apply.setText(tr("cc_btn_apply"))
+    _cc_refresh_preview(tool_window)
+

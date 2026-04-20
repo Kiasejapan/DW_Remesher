@@ -1,0 +1,179 @@
+# ---------------------------------------------------------------------------
+# Math helpers  (pure Python, no Maya dependency)
+# ---------------------------------------------------------------------------
+_EPS = 1e-9
+
+
+def _vsub(a, b):  return (a[0]-b[0], a[1]-b[1], a[2]-b[2])
+def _vadd(a, b):  return (a[0]+b[0], a[1]+b[1], a[2]+b[2])
+def _vmul(a, s):  return (a[0]*s, a[1]*s, a[2]*s)
+def _vdot(a, b):  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+def _vcross(a, b):
+    return (a[1]*b[2] - a[2]*b[1],
+            a[2]*b[0] - a[0]*b[2],
+            a[0]*b[1] - a[1]*b[0])
+def _vlen(a):     return math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2])
+
+
+def _vnorm(a):
+    L = _vlen(a)
+    if L < _EPS:
+        return (0.0, 0.0, 0.0)
+    return (a[0]/L, a[1]/L, a[2]/L)
+
+
+def _centroid(pts):
+    if not pts:
+        return (0.0, 0.0, 0.0)
+    n = len(pts)
+    sx = sy = sz = 0.0
+    for p in pts:
+        sx += p[0]; sy += p[1]; sz += p[2]
+    return (sx / n, sy / n, sz / n)
+
+
+def _median(values):
+    """Median of a list of floats. Returns 0.0 for empty list."""
+    n = len(values)
+    if n == 0:
+        return 0.0
+    s = sorted(values)
+    mid = n // 2
+    if n % 2 == 1:
+        return s[mid]
+    return 0.5 * (s[mid - 1] + s[mid])
+
+
+# ---------------------------------------------------------------------------
+# Tiny symmetric 3x3 eigen solver via Jacobi rotation.
+# Returns (eigenvalues, eigenvectors) with eigenvalues sorted descending.
+# eigenvectors are the columns of the returned 3x3 matrix (as list of rows).
+# This is enough for PCA on a small covariance matrix.
+# ---------------------------------------------------------------------------
+
+def _jacobi_eigen_3x3(A):
+    """
+    A : 3x3 symmetric matrix, represented as list of 3 lists.
+    Returns : (evals, evecs)
+        evals : (l1, l2, l3)   sorted descending
+        evecs : 3x3 list-of-rows, each column is a unit eigenvector
+                matching the corresponding eigenvalue position.
+    """
+    # Make a mutable copy
+    a = [row[:] for row in A]
+    # Identity for accumulated rotations (eigenvectors as columns)
+    v = [[1.0, 0.0, 0.0],
+         [0.0, 1.0, 0.0],
+         [0.0, 0.0, 1.0]]
+
+    for _ in range(64):
+        # Find largest off-diagonal magnitude
+        p, q = 0, 1
+        off_max = abs(a[0][1])
+        if abs(a[0][2]) > off_max:
+            p, q = 0, 2
+            off_max = abs(a[0][2])
+        if abs(a[1][2]) > off_max:
+            p, q = 1, 2
+            off_max = abs(a[1][2])
+
+        if off_max < 1e-12:
+            break  # converged
+
+        app = a[p][p]
+        aqq = a[q][q]
+        apq = a[p][q]
+
+        if abs(apq) < 1e-20:
+            break
+
+        # Compute Jacobi rotation angle
+        theta = (aqq - app) / (2.0 * apq)
+        if theta >= 0.0:
+            t = 1.0 / (theta + math.sqrt(1.0 + theta * theta))
+        else:
+            t = 1.0 / (theta - math.sqrt(1.0 + theta * theta))
+        c = 1.0 / math.sqrt(1.0 + t * t)
+        s = t * c
+
+        # Update a
+        a[p][p] = app - t * apq
+        a[q][q] = aqq + t * apq
+        a[p][q] = 0.0
+        a[q][p] = 0.0
+        for i in range(3):
+            if i != p and i != q:
+                aip = a[i][p]
+                aiq = a[i][q]
+                a[i][p] = c * aip - s * aiq
+                a[p][i] = a[i][p]
+                a[i][q] = s * aip + c * aiq
+                a[q][i] = a[i][q]
+
+        # Update eigenvector matrix
+        for i in range(3):
+            vip = v[i][p]
+            viq = v[i][q]
+            v[i][p] = c * vip - s * viq
+            v[i][q] = s * vip + c * viq
+
+    evals = (a[0][0], a[1][1], a[2][2])
+    # Sort descending by eigenvalue, reorder columns of v
+    order = sorted(range(3), key=lambda i: -evals[i])
+    sorted_evals = tuple(evals[i] for i in order)
+    sorted_v = [[v[row][order[col]] for col in range(3)] for row in range(3)]
+    return sorted_evals, sorted_v
+
+
+def _pca_principal_axis(points):
+    """
+    Returns (axis_unit_vector, centroid) for a list of 3D points.
+    The axis is the first principal component (largest variance).
+    """
+    c = _centroid(points)
+    # Build covariance matrix
+    sxx = syy = szz = sxy = sxz = syz = 0.0
+    for p in points:
+        dx = p[0] - c[0]
+        dy = p[1] - c[1]
+        dz = p[2] - c[2]
+        sxx += dx * dx
+        syy += dy * dy
+        szz += dz * dz
+        sxy += dx * dy
+        sxz += dx * dz
+        syz += dy * dz
+    n = max(1, len(points))
+    cov = [[sxx / n, sxy / n, sxz / n],
+           [sxy / n, syy / n, syz / n],
+           [sxz / n, syz / n, szz / n]]
+    evals, evecs = _jacobi_eigen_3x3(cov)
+    # First column of evecs is the principal axis
+    axis = (evecs[0][0], evecs[1][0], evecs[2][0])
+    return _vnorm(axis), c
+
+
+def _project_onto_axis(point, axis_origin, axis_dir):
+    """
+    Returns t such that (axis_origin + t * axis_dir) is the foot of perpendicular.
+    axis_dir must be unit length.
+    """
+    d = _vsub(point, axis_origin)
+    return _vdot(d, axis_dir)
+
+
+def _build_orthonormal_basis(axis):
+    """
+    Given a unit axis vector, return two unit vectors (u, v) that together
+    with `axis` form a right-handed orthonormal basis.
+    """
+    # Choose a helper not parallel to axis
+    if abs(axis[0]) < 0.9:
+        helper = (1.0, 0.0, 0.0)
+    else:
+        helper = (0.0, 1.0, 0.0)
+    u = _vnorm(_vcross(axis, helper))
+    v = _vnorm(_vcross(axis, u))
+    return u, v
+
+

@@ -1,0 +1,215 @@
+# ---------------------------------------------------------------------------
+# Cylinder Change-Sides UI  (Pattern C -- form)
+# ---------------------------------------------------------------------------
+
+def _rs_build_group(tool_window, parent_layout):
+    """Build the Change-Sides form group and append to parent_layout."""
+    tool_window._rs_target_shape = None
+
+    grp = QtWidgets.QGroupBox()
+    grp.setStyleSheet(
+        "QGroupBox{border:1px solid #4CAF50;border-radius:6px;"
+        "background-color:#2E2E2E;margin-top:6px}"
+        "QGroupBox::title{subcontrol-origin:margin;left:10px;"
+        "color:#EEE;font-size:11px;font-weight:bold}")
+    lo = QtWidgets.QVBoxLayout(grp)
+    lo.setContentsMargins(8, 12, 8, 8)
+    lo.setSpacing(6)
+
+    tool_window._rs_grp_lbl = QtWidgets.QLabel(
+        u"\u25A0 " + tr("rs_grp_title"))
+    tool_window._rs_grp_lbl.setStyleSheet(
+        "color:#4CAF50;font-size:11px;font-weight:bold")
+    lo.addWidget(tool_window._rs_grp_lbl)
+
+    # Target row
+    row = QtWidgets.QHBoxLayout()
+    tool_window._rs_lbl_target = QtWidgets.QLabel(tr("rs_lbl_target"))
+    tool_window._rs_lbl_target.setStyleSheet(_LBL_SS)
+    tool_window._rs_lbl_target.setFixedWidth(110)
+    row.addWidget(tool_window._rs_lbl_target)
+    tool_window._rs_txt_target = QtWidgets.QLineEdit()
+    tool_window._rs_txt_target.setReadOnly(True)
+    tool_window._rs_txt_target.setStyleSheet(_FIELD_SS)
+    row.addWidget(tool_window._rs_txt_target)
+    tool_window._rs_btn_set = QtWidgets.QPushButton(tr("btn_set"))
+    tool_window._rs_btn_set.setStyleSheet(_SET_BTN_SS)
+    tool_window._rs_btn_set.setFixedWidth(50)
+    tool_window._rs_btn_set.clicked.connect(
+        lambda: _rs_set_target(tool_window))
+    row.addWidget(tool_window._rs_btn_set)
+    lo.addLayout(row)
+
+    # Current sides display
+    cur_row = QtWidgets.QHBoxLayout()
+    tool_window._rs_lbl_current = QtWidgets.QLabel(tr("rs_lbl_current"))
+    tool_window._rs_lbl_current.setStyleSheet(_LBL_SS)
+    tool_window._rs_lbl_current.setFixedWidth(110)
+    cur_row.addWidget(tool_window._rs_lbl_current)
+    tool_window._rs_txt_current = QtWidgets.QLineEdit(u"---")
+    tool_window._rs_txt_current.setReadOnly(True)
+    tool_window._rs_txt_current.setStyleSheet(_FIELD_SS)
+    tool_window._rs_txt_current.setFixedWidth(75)
+    cur_row.addWidget(tool_window._rs_txt_current)
+    cur_row.addStretch()
+    lo.addLayout(cur_row)
+
+    # Separator
+    sep = QtWidgets.QFrame()
+    sep.setFrameShape(QtWidgets.QFrame.HLine)
+    sep.setStyleSheet("color:#555")
+    lo.addWidget(sep)
+
+    # Target sides spin
+    tgt_row = QtWidgets.QHBoxLayout()
+    tool_window._rs_lbl_target_sides = QtWidgets.QLabel(tr("rs_lbl_target_sides"))
+    tool_window._rs_lbl_target_sides.setStyleSheet(_LBL_SS)
+    tool_window._rs_lbl_target_sides.setFixedWidth(110)
+    tgt_row.addWidget(tool_window._rs_lbl_target_sides)
+    tool_window._rs_spin_sides = QtWidgets.QSpinBox()
+    tool_window._rs_spin_sides.setRange(3, 128)
+    tool_window._rs_spin_sides.setValue(8)
+    tool_window._rs_spin_sides.setFixedWidth(75)
+    tool_window._rs_spin_sides.setStyleSheet(_SPIN_SS)
+    tgt_row.addWidget(tool_window._rs_spin_sides)
+    tgt_row.addStretch()
+    lo.addLayout(tgt_row)
+
+    # Options checkboxes
+    tool_window._rs_cb_caps = QtWidgets.QCheckBox(tr("rs_chk_keep_caps"))
+    tool_window._rs_cb_caps.setStyleSheet(_CB_SS)
+    tool_window._rs_cb_caps.setChecked(True)
+    lo.addWidget(tool_window._rs_cb_caps)
+
+    tool_window._rs_cb_uv = QtWidgets.QCheckBox(tr("rs_chk_keep_uv"))
+    tool_window._rs_cb_uv.setStyleSheet(_CB_SS)
+    tool_window._rs_cb_uv.setChecked(True)
+    lo.addWidget(tool_window._rs_cb_uv)
+
+    tool_window._rs_cb_replace = QtWidgets.QCheckBox(tr("rs_chk_replace"))
+    tool_window._rs_cb_replace.setStyleSheet(_CB_SS)
+    tool_window._rs_cb_replace.setChecked(False)
+    lo.addWidget(tool_window._rs_cb_replace)
+
+    # Apply button
+    btn_row = QtWidgets.QHBoxLayout()
+    btn_row.addStretch()
+    tool_window._rs_btn_apply = _mkbtn(tr("rs_btn_apply"), 28,
+                                       "#4CAF50", "#388E3C")
+    tool_window._rs_btn_apply.setFixedWidth(140)
+    tool_window._rs_btn_apply.clicked.connect(
+        lambda: _rs_on_apply(tool_window))
+    btn_row.addWidget(tool_window._rs_btn_apply)
+    btn_row.addStretch()
+    lo.addLayout(btn_row)
+
+    parent_layout.addWidget(grp)
+    return grp
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
+def _rs_set_status(tool_window, text):
+    if hasattr(tool_window, "_status_bar"):
+        tool_window._status_bar.setText(text)
+
+
+def _rs_set_target(tool_window):
+    if not MAYA_AVAILABLE:
+        return
+    shapes = MayaBridge.get_selected_meshes()
+    if not shapes:
+        tool_window._rs_target_shape = None
+        tool_window._rs_txt_target.setText(u"---")
+        tool_window._rs_txt_current.setText(u"---")
+        _rs_set_status(tool_window, tr("status_no_mesh"))
+        return
+    shape = shapes[0]
+    tool_window._rs_target_shape = shape
+    tool_window._rs_txt_target.setText(MayaBridge.get_short_name(
+        MayaBridge.get_transform(shape)))
+    # Detect current sides
+    try:
+        analysis = analyze_cylinder(shape, axis_choice="auto")
+    except Exception:
+        analysis = None
+    if analysis is None:
+        tool_window._rs_txt_current.setText(u"---")
+        _rs_set_status(tool_window, tr("status_not_cyl"))
+        return
+    tool_window._rs_txt_current.setText(u"{0}".format(analysis["sides"]))
+    _rs_set_status(tool_window, tr("status_target_set",
+                                   name=MayaBridge.get_short_name(shape)))
+
+
+def _rs_on_apply(tool_window):
+    if not MAYA_AVAILABLE:
+        return
+    if not tool_window._rs_target_shape:
+        _rs_set_status(tool_window, tr("status_target_not_set"))
+        return
+
+    target_sides = int(tool_window._rs_spin_sides.value())
+    create_caps = bool(tool_window._rs_cb_caps.isChecked())
+    preserve_uv = bool(tool_window._rs_cb_uv.isChecked())
+    replace     = bool(tool_window._rs_cb_replace.isChecked())
+
+    # Always use auto axis for resides (we can expose the radio later)
+    try:
+        analysis = analyze_cylinder(tool_window._rs_target_shape,
+                                    axis_choice="auto")
+    except Exception as e:
+        _rs_set_status(tool_window, tr("status_error", msg=str(e)))
+        return
+
+    if analysis is None:
+        _rs_set_status(tool_window, tr("status_not_cyl"))
+        return
+
+    old_sides = analysis["sides"]
+    rings_cnt = len(analysis["rings"])
+
+    cmds.undoInfo(openChunk=True, chunkName="DW_CylinderResides")
+    try:
+        new_xform = resides_cylinder(
+            analysis, tool_window._rs_target_shape,
+            target_sides,
+            create_caps=create_caps,
+            replace=replace,
+            preserve_uv=preserve_uv,
+        )
+        # If we replaced, the old shape is gone; pick up the new shape
+        if replace and new_xform:
+            new_shapes = cmds.listRelatives(
+                new_xform, shapes=True, fullPath=True) or []
+            if new_shapes:
+                tool_window._rs_target_shape = new_shapes[0]
+                tool_window._rs_txt_target.setText(
+                    MayaBridge.get_short_name(new_xform))
+                tool_window._rs_txt_current.setText(u"{0}".format(target_sides))
+        _rs_set_status(tool_window, tr(
+            "status_resides_done",
+            old=old_sides, new=target_sides, rings=rings_cnt))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        _rs_set_status(tool_window, tr("status_error", msg=str(e)))
+    finally:
+        cmds.undoInfo(closeChunk=True)
+
+
+def _rs_refresh_labels(tool_window):
+    if not hasattr(tool_window, "_rs_grp_lbl"):
+        return
+    tool_window._rs_grp_lbl.setText(u"\u25A0 " + tr("rs_grp_title"))
+    tool_window._rs_lbl_target.setText(tr("rs_lbl_target"))
+    tool_window._rs_btn_set.setText(tr("btn_set"))
+    tool_window._rs_lbl_current.setText(tr("rs_lbl_current"))
+    tool_window._rs_lbl_target_sides.setText(tr("rs_lbl_target_sides"))
+    tool_window._rs_cb_caps.setText(tr("rs_chk_keep_caps"))
+    tool_window._rs_cb_uv.setText(tr("rs_chk_keep_uv"))
+    tool_window._rs_cb_replace.setText(tr("rs_chk_replace"))
+    tool_window._rs_btn_apply.setText(tr("rs_btn_apply"))
+

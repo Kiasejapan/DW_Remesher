@@ -1,0 +1,189 @@
+# ---------------------------------------------------------------------------
+# Localization
+# ---------------------------------------------------------------------------
+LANG_EN = "en"
+LANG_JP = "jp"
+_current_lang = LANG_EN
+_saved_geometry = None
+_saved_lang = None
+
+_STRINGS = {
+    # ---- Window / common ---------------------------------------------
+    "window_title":         {"en": "DW Remesher",
+                             "jp": u"DW \u30ea\u30e1\u30c3\u30b7\u30e3\u30fc"},
+    "btn_reload":           {"en": "Reload",                        "jp": u"\u30ea\u30ed\u30fc\u30c9"},
+    "btn_update":           {"en": "Check for Updates",             "jp": u"\u66f4\u65b0\u3092\u78ba\u8a8d"},
+    "btn_help":             {"en": "?",                             "jp": u"?"},
+    "btn_lang":             {"en": "JP",                            "jp": u"EN"},
+    "btn_close":            {"en": "Close",                         "jp": u"\u9589\u3058\u308b"},
+    "btn_set":              {"en": "Set",                           "jp": u"\u30bb\u30c3\u30c8"},
+    "status_ready":         {"en": "Ready",                         "jp": u"\u6e96\u5099\u5b8c\u4e86"},
+
+    # ---- Tabs --------------------------------------------------------
+    "tab_cylinder":         {"en": "Cylinder",                      "jp": u"\u5186\u67f1"},
+
+    # ---- Cylinder Cleanup (cc_*) -------------------------------------
+    "cc_grp_title":         {"en": "Cylinder Cleanup",
+                             "jp": u"\u5186\u67f1\u30af\u30ea\u30fc\u30f3\u30a2\u30c3\u30d7"},
+    "cc_lbl_target":        {"en": "Target:",                       "jp": u"\u5bfe\u8c61:"},
+    "cc_lbl_axis":          {"en": "Axis:",                         "jp": u"\u8ef8:"},
+    "cc_ax_auto":           {"en": "Auto",                          "jp": u"\u81ea\u52d5"},
+    "cc_lbl_mode":          {"en": "Mode:",                         "jp": u"\u30e2\u30fc\u30c9:"},
+    "cc_mode_full":         {"en": "Round && Straighten",
+                             "jp": u"\u6574\u5217\uff0b\u5747\u7b49\u5316"},
+    "cc_mode_radius":       {"en": "Radius only",
+                             "jp": u"\u534a\u5f84\u306e\u307f"},
+    "cc_lbl_radius_avg":    {"en": "Radius policy:",
+                             "jp": u"\u534a\u5f84\u306e\u6c7a\u3081\u65b9:"},
+    "cc_radius_mean":       {"en": "Mean",                          "jp": u"\u5e73\u5747"},
+    "cc_radius_median":     {"en": "Median",                        "jp": u"\u4e2d\u592e\u5024"},
+    "cc_btn_apply":         {"en": "Cleanup",                       "jp": u"\u6574\u5f62"},
+    "cc_info_detected":     {"en": "Axis: {axis}  Rings: {rings}  Sides: {sides}",
+                             "jp": u"\u8ef8: {axis}  \u30ea\u30f3\u30b0\u6570: {rings}  \u89d2\u6570: {sides}"},
+
+    # ---- Change Sides / Resides (rs_*) -------------------------------
+    "rs_grp_title":         {"en": "Change Sides (N\u21C4M)",
+                             "jp": u"\u89d2\u6570\u5909\u66f4 (N\u21C4M)"},
+    "rs_lbl_target":        {"en": "Target:",                       "jp": u"\u5bfe\u8c61:"},
+    "rs_lbl_current":       {"en": "Current sides:",                "jp": u"\u73fe\u5728\u306e\u89d2\u6570:"},
+    "rs_lbl_target_sides":  {"en": "Target sides:",                 "jp": u"\u5909\u66f4\u5f8c\u306e\u89d2\u6570:"},
+    "rs_chk_keep_uv":       {"en": "Preserve UV (cylindrical projection)",
+                             "jp": u"UV \u3092\u7dad\u6301 (\u5186\u7b52\u6295\u5f71)"},
+    "rs_chk_keep_caps":     {"en": "Create end caps",
+                             "jp": u"\u7aef\u30ad\u30e3\u30c3\u30d7\u3092\u4f5c\u6210"},
+    "rs_chk_replace":       {"en": "Replace original (otherwise duplicate)",
+                             "jp": u"\u5143\u3092\u7f6e\u304d\u63db\u3048\u308b (\u30aa\u30d5\u306a\u3089\u8907\u88fd)"},
+    "rs_btn_apply":         {"en": "Apply",                         "jp": u"\u9069\u7528"},
+
+    # ---- Status / Errors ---------------------------------------------
+    "status_no_mesh":       {"en": "No mesh selected.",
+                             "jp": u"\u30e1\u30c3\u30b7\u30e5\u304c\u9078\u629e\u3055\u308c\u3066\u3044\u307e\u305b\u3093\u3002"},
+    "status_not_cyl":       {"en": "Mesh does not look like a cylinder (axis/rings undetectable).",
+                             "jp": u"\u30e1\u30c3\u30b7\u30e5\u304c\u5186\u67f1\u3068\u3057\u3066\u8a8d\u8b58\u3067\u304d\u307e\u305b\u3093\u3002"},
+    "status_cleanup_done":  {"en": "Cleanup done. Axis={axis}, rings={rings}, sides={sides}.",
+                             "jp": u"\u6574\u5f62\u5b8c\u4e86\u3002\u8ef8={axis}, \u30ea\u30f3\u30b0={rings}, \u89d2\u6570={sides}"},
+    "status_resides_done":  {"en": "Resides done: {old}-gon \u2192 {new}-gon ({rings} rings).",
+                             "jp": u"\u89d2\u6570\u5909\u66f4\u5b8c\u4e86: {old}\u89d2 \u2192 {new}\u89d2 ({rings} \u30ea\u30f3\u30b0)"},
+    "status_target_not_set":{"en": "Target mesh is not set.",
+                             "jp": u"\u5bfe\u8c61\u30e1\u30c3\u30b7\u30e5\u304c\u672a\u8a2d\u5b9a\u3067\u3059\u3002"},
+    "status_error":         {"en": "Error: {msg}",
+                             "jp": u"\u30a8\u30e9\u30fc: {msg}"},
+    "status_target_set":    {"en": "Target: {name}",
+                             "jp": u"\u5bfe\u8c61: {name}"},
+
+    # ---- Help --------------------------------------------------------
+    "help_title":           {"en": "Help \u2014 DW Remesher",
+                             "jp": u"\u30d8\u30eb\u30d7 \u2014 DW \u30ea\u30e1\u30c3\u30b7\u30e3\u30fc"},
+    "help_body_cylinder": {
+        "en": "<h2>Cylinder Tab</h2>"
+              "<h3>Cylinder Cleanup</h3>"
+              "<p>Takes a distorted cylindrical mesh and snaps it to a "
+              "perfectly regular cylinder. The original topology and UVs "
+              "are preserved; only vertex positions change.</p>"
+              "<ol>"
+              "<li>Select the mesh in the viewport and click <b>[Set]</b>.</li>"
+              "<li>Choose an <b>Axis</b>:"
+              "<ul>"
+              "<li><b>Auto</b> \u2014 detected by principal-component analysis (PCA) of the mesh.</li>"
+              "<li><b>X / Y / Z</b> \u2014 force a local axis.</li>"
+              "</ul></li>"
+              "<li>Choose a <b>Mode</b>:"
+              "<ul>"
+              "<li><b>Round &amp; Straighten</b> \u2014 equalize both radii and angular spacing (fully regular).</li>"
+              "<li><b>Radius only</b> \u2014 equalize radii but keep each vertex's original angle around the axis.</li>"
+              "</ul></li>"
+              "<li>Pick a <b>Radius policy</b>: <b>Mean</b> (default) or <b>Median</b> (robust to outliers).</li>"
+              "<li>Click <b>[Cleanup]</b>.</li>"
+              "</ol>"
+              "<h3>Change Sides (N\u21C4M)</h3>"
+              "<p>Rebuilds the selected cylinder with a different polygon side count. "
+              "Rings (edge loops along the axis) and their per-ring radii are kept. "
+              "Cylindrical UV projection is applied to the new mesh.</p>"
+              "<ol>"
+              "<li>Select the cylinder and click <b>[Set]</b>. The current side count is auto-detected.</li>"
+              "<li>Set <b>Target sides</b> (3-128).</li>"
+              "<li>Toggle <b>Create end caps</b> if the source had them.</li>"
+              "<li>Toggle <b>Replace original</b> to delete the source after conversion, or keep it off to create a duplicate.</li>"
+              "<li>Click <b>[Apply]</b>.</li>"
+              "</ol>"
+              "<p><b>Note:</b> UVs are recreated by cylindrical projection, not transferred 1:1. "
+              "Meshes whose original UVs were a standard cylindrical layout will look nearly identical.</p>",
+        "jp": u"<h2>\u5186\u67f1\u30bf\u30d6</h2>"
+              u"<h3>\u5186\u67f1\u30af\u30ea\u30fc\u30f3\u30a2\u30c3\u30d7</h3>"
+              u"<p>\u6b6a\u3093\u3060\u5186\u67f1\u5f62\u30e1\u30c3\u30b7\u30e5\u3092\u3001\u5b8c\u5168\u306b\u6574\u3063\u305f\u5186\u67f1\u306b\u30b9\u30ca\u30c3\u30d7\u3057\u307e\u3059\u3002"
+              u"\u30c8\u30dd\u30ed\u30b8\u3068 UV \u306f\u305d\u306e\u307e\u307e\u3001\u9802\u70b9\u4f4d\u7f6e\u3060\u3051\u304c\u5909\u308f\u308a\u307e\u3059\u3002</p>"
+              u"<ol>"
+              u"<li>\u30d3\u30e5\u30fc\u30dd\u30fc\u30c8\u3067\u30e1\u30c3\u30b7\u30e5\u3092\u9078\u629e\u3057\u3001<b>[\u30bb\u30c3\u30c8]</b> \u3092\u30af\u30ea\u30c3\u30af\u3002</li>"
+              u"<li><b>\u8ef8</b> \u3092\u9078\u629e\uff1a"
+              u"<ul>"
+              u"<li><b>\u81ea\u52d5</b> \u2014 \u30e1\u30c3\u30b7\u30e5\u306e\u4e3b\u6210\u5206\u5206\u6790 (PCA) \u3067\u81ea\u52d5\u5224\u5b9a\u3002</li>"
+              u"<li><b>X / Y / Z</b> \u2014 \u30ed\u30fc\u30ab\u30eb\u8ef8\u3092\u660e\u793a\u7684\u306b\u6307\u5b9a\u3002</li>"
+              u"</ul></li>"
+              u"<li><b>\u30e2\u30fc\u30c9</b> \u3092\u9078\u629e\uff1a"
+              u"<ul>"
+              u"<li><b>\u6574\u5217\uff0b\u5747\u7b49\u5316</b> \u2014 \u534a\u5f84\u3068\u89d2\u5ea6\u9593\u9694\u3092\u4e21\u65b9\u63c3\u3048\u307e\u3059\uff08\u5b8c\u5168\u306b\u898f\u5247\u7684\uff09\u3002</li>"
+              u"<li><b>\u534a\u5f84\u306e\u307f</b> \u2014 \u534a\u5f84\u306f\u63c3\u3048\u3064\u3064\u3001\u5404\u9802\u70b9\u306e\u89d2\u5ea6\u306f\u7dad\u6301\u3002</li>"
+              u"</ul></li>"
+              u"<li><b>\u534a\u5f84\u306e\u6c7a\u3081\u65b9</b>\uff1a<b>\u5e73\u5747</b> (\u63a8\u5968) \u307e\u305f\u306f <b>\u4e2d\u592e\u5024</b> (\u5916\u308c\u5024\u306b\u5f37\u3044)\u3002</li>"
+              u"<li><b>[\u6574\u5f62]</b> \u3092\u30af\u30ea\u30c3\u30af\u3002</li>"
+              u"</ol>"
+              u"<h3>\u89d2\u6570\u5909\u66f4 (N\u21C4M)</h3>"
+              u"<p>\u9078\u629e\u5186\u67f1\u3092\u5225\u306e\u89d2\u6570\u3067\u518d\u69cb\u7bc9\u3057\u307e\u3059\u3002"
+              u"\u30ea\u30f3\u30b0\uff08\u8ef8\u65b9\u5411\u306e\u30a8\u30c3\u30b8\u30eb\u30fc\u30d7\uff09\u3068\u5404\u30ea\u30f3\u30b0\u306e\u534a\u5f84\u306f\u4fdd\u6301\u3055\u308c\u307e\u3059\u3002"
+              u"\u65b0\u30e1\u30c3\u30b7\u30e5\u306b\u306f\u5186\u7b52\u6295\u5f71\u306e UV \u304c\u9069\u7528\u3055\u308c\u307e\u3059\u3002</p>"
+              u"<ol>"
+              u"<li>\u5186\u67f1\u3092\u9078\u629e\u3057\u3066 <b>[\u30bb\u30c3\u30c8]</b>\u3002\u73fe\u5728\u306e\u89d2\u6570\u304c\u81ea\u52d5\u691c\u51fa\u3055\u308c\u307e\u3059\u3002</li>"
+              u"<li><b>\u5909\u66f4\u5f8c\u306e\u89d2\u6570</b> (3\uff5e128) \u3092\u8a2d\u5b9a\u3002</li>"
+              u"<li>\u5143\u30e1\u30c3\u30b7\u30e5\u306b\u7aef\u30ad\u30e3\u30c3\u30d7\u304c\u3042\u308b\u306a\u3089 <b>\u7aef\u30ad\u30e3\u30c3\u30d7\u3092\u4f5c\u6210</b> \u3092\u30aa\u30f3\u3002</li>"
+              u"<li><b>\u5143\u3092\u7f6e\u304d\u63db\u3048\u308b</b>\uff1a\u30aa\u30f3\u3067\u5143\u30e1\u30c3\u30b7\u30e5\u3092\u524a\u9664\u3001\u30aa\u30d5\u3067\u8907\u88fd\u3068\u3057\u3066\u751f\u6210\u3002</li>"
+              u"<li><b>[\u9069\u7528]</b> \u3092\u30af\u30ea\u30c3\u30af\u3002</li>"
+              u"</ol>"
+              u"<p><b>\u6ce8\u610f:</b> UV \u306f\u5186\u7b52\u6295\u5f71\u3067\u518d\u751f\u6210\u3055\u308c\u307e\u3059\uff081:1 \u3067\u306e\u8ee2\u9001\u3067\u306f\u3042\u308a\u307e\u305b\u3093\uff09\u3002"
+              u"\u5143\u304c\u6a19\u6e96\u7684\u306a\u5186\u7b52 UV \u30ec\u30a4\u30a2\u30a6\u30c8\u306a\u3089\u307b\u307c\u5909\u5316\u3057\u307e\u305b\u3093\u3002</p>",
+    },
+}
+
+# Python 2/3 unicode type compatibility for tr()
+try:
+    _TEXT_TYPE = unicode  # Python 2
+except NameError:
+    _TEXT_TYPE = str       # Python 3
+
+
+def _to_unicode(s):
+    """Force a value into unicode (Python 2) / str (Python 3).
+
+    On Maya 2018 + Japanese Windows (CP932 locale), str.format() with
+    a mix of bytes-str and unicode triggers ASCII auto-decoding which
+    fails for non-ASCII characters. Returning unicode-only from tr()
+    eliminates this entire class of error.
+    """
+    if isinstance(s, _TEXT_TYPE):
+        return s
+    if isinstance(s, bytes):
+        try:
+            return s.decode("utf-8")
+        except Exception:
+            return s.decode("utf-8", "replace")
+    try:
+        return _TEXT_TYPE(s)
+    except Exception:
+        return _TEXT_TYPE(repr(s))
+
+
+def tr(key, **kw):
+    e = _STRINGS.get(key, {})
+    if isinstance(e, dict) and ("en" in e or "jp" in e):
+        t = e.get(_current_lang, e.get("en", key))
+    else:
+        t = key
+    t = _to_unicode(t)
+    if kw:
+        kw = {k: _to_unicode(v) for k, v in kw.items()}
+        try:
+            t = t.format(**kw)
+        except Exception:
+            pass
+    return t
+
+
