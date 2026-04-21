@@ -11,7 +11,7 @@ import math
 
 # Version is rewritten by build.py at every build
 # Format: YYYY.MM.DD.HHMM
-VERSION = "2026.04.20.1250"
+VERSION = "2026.04.21.1614"
 
 # GitHub raw file URL for auto-update
 _GITHUB_RAW_URL = "https://raw.githubusercontent.com/Kiasejapan/DW_Remesher/main/DW_Remesher.py"

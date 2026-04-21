@@ -11,7 +11,7 @@ import math
 
 # Version is rewritten by build.py at every build
 # Format: YYYY.MM.DD.HHMM
-VERSION = "2026.04.20.1250"
+VERSION = "2026.04.21.1614"
 
 # GitHub raw file URL for auto-update
 _GITHUB_RAW_URL = "https://raw.githubusercontent.com/Kiasejapan/DW_Remesher/main/DW_Remesher.py"
@@ -75,6 +75,8 @@ _STRINGS = {
     "cc_lbl_target":        {"en": "Target:",                       "jp": u"\u5bfe\u8c61:"},
     "cc_lbl_axis":          {"en": "Axis:",                         "jp": u"\u8ef8:"},
     "cc_ax_auto":           {"en": "Auto",                          "jp": u"\u81ea\u52d5"},
+    "cc_ax_best":           {"en": "Best ring",
+                             "jp": u"\u6700\u826f\u30ea\u30f3\u30b0"},
     "cc_lbl_mode":          {"en": "Mode:",                         "jp": u"\u30e2\u30fc\u30c9:"},
     "cc_mode_full":         {"en": "Round && Straighten",
                              "jp": u"\u6574\u5217\uff0b\u5747\u7b49\u5316"},
@@ -85,6 +87,9 @@ _STRINGS = {
     "cc_radius_mean":       {"en": "Mean",                          "jp": u"\u5e73\u5747"},
     "cc_radius_median":     {"en": "Median",                        "jp": u"\u4e2d\u592e\u5024"},
     "cc_btn_apply":         {"en": "Cleanup",                       "jp": u"\u6574\u5f62"},
+    "cc_btn_preview":       {"en": "Preview",                       "jp": u"\u30d7\u30ec\u30d3\u30e5\u30fc"},
+    "cc_btn_confirm":       {"en": "Confirm",                       "jp": u"\u78ba\u5b9a"},
+    "cc_btn_cancel":        {"en": "Cancel",                        "jp": u"\u53d6\u6d88"},
     "cc_info_detected":     {"en": "Axis: {axis}  Rings: {rings}  Sides: {sides}",
                              "jp": u"\u8ef8: {axis}  \u30ea\u30f3\u30b0\u6570: {rings}  \u89d2\u6570: {sides}"},
 
@@ -361,13 +366,9 @@ def _jacobi_eigen_3x3(A):
     return sorted_evals, sorted_v
 
 
-def _pca_principal_axis(points):
-    """
-    Returns (axis_unit_vector, centroid) for a list of 3D points.
-    The axis is the first principal component (largest variance).
-    """
+def _covariance_and_centroid(points):
+    """Shared: return (3x3 covariance matrix, centroid) for points."""
     c = _centroid(points)
-    # Build covariance matrix
     sxx = syy = szz = sxy = sxz = syz = 0.0
     for p in points:
         dx = p[0] - c[0]
@@ -383,10 +384,32 @@ def _pca_principal_axis(points):
     cov = [[sxx / n, sxy / n, sxz / n],
            [sxy / n, syy / n, syz / n],
            [sxz / n, syz / n, szz / n]]
+    return cov, c
+
+
+def _pca_principal_axis(points):
+    """
+    Returns (axis_unit_vector, centroid) for a list of 3D points.
+    The axis is the first principal component (largest variance).
+    """
+    cov, c = _covariance_and_centroid(points)
     evals, evecs = _jacobi_eigen_3x3(cov)
-    # First column of evecs is the principal axis
+    # First column of evecs is the principal axis (largest eigenvalue)
     axis = (evecs[0][0], evecs[1][0], evecs[2][0])
     return _vnorm(axis), c
+
+
+def _pca_plane_normal(points):
+    """
+    Returns (normal_unit_vector, centroid) for points approximately
+    lying on a plane. The normal is the smallest principal component
+    (minimum variance direction).
+    """
+    cov, c = _covariance_and_centroid(points)
+    evals, evecs = _jacobi_eigen_3x3(cov)
+    # Third column = smallest eigenvalue = plane normal
+    normal = (evecs[0][2], evecs[1][2], evecs[2][2])
+    return _vnorm(normal), c
 
 
 def _project_onto_axis(point, axis_origin, axis_dir):
@@ -585,6 +608,39 @@ _AXIS_WORLD = {
 }
 
 
+def _ring_circularity(ring_verts, positions, center, axis):
+    """Coefficient of variation of radii (std / mean).
+    Lower = more circular; 0 = perfect circle. inf if mean_r ~ 0."""
+    radii = []
+    for i in ring_verts:
+        p = positions[i]
+        d = _vsub(p, center)
+        t_comp = _vdot(d, axis)
+        perp = _vsub(d, _vmul(axis, t_comp))
+        radii.append(_vlen(perp))
+    n = len(radii)
+    if n == 0:
+        return float("inf")
+    mean_r = sum(radii) / n
+    if mean_r < _EPS:
+        return float("inf")
+    var = sum((r - mean_r) ** 2 for r in radii) / n
+    return math.sqrt(var) / mean_r
+
+
+def _find_best_ring_index(rings, positions, axis):
+    """Return index of the ring with lowest radii coefficient-of-variation."""
+    best_idx = 0
+    best_score = float("inf")
+    for i, ring in enumerate(rings):
+        score = _ring_circularity(
+            ring["verts"], positions, ring["center"], axis)
+        if score < best_score:
+            best_score = score
+            best_idx = i
+    return best_idx
+
+
 def _compute_ring_radii_and_center(vert_ids, positions, axis_origin, axis_dir):
     """Helper: for a set of vertex indices assumed to lie in a ring around
     axis, return (center_point_on_axis, mean_radius, median_radius, radii_list)."""
@@ -611,7 +667,10 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
     """
     Analyze a mesh as a cylinder.
 
-    axis_choice : "auto" | "x" | "y" | "z"   (local-space axis selection)
+    axis_choice : "auto" | "x" | "y" | "z" | "best_ring"
+        "best_ring" performs an auto analysis first, then refits the axis
+        using the most circular ring's fitted plane (normal = axis,
+        center = origin). Per-ring radii are preserved (taper-safe).
 
     Returns a dict:
         {
@@ -623,6 +682,7 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
           "positions":  [(x,y,z) ...] per vertex, world space,
           "cap_vert_ids": set(int) -- vertices that don't fit any ring,
           "ring_tolerance": float used for clustering,
+          "best_ring_idx": int, present only if axis_choice=="best_ring",
         }
     or None if the mesh can't be analyzed as a cylinder.
     """
@@ -633,11 +693,15 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
     if len(positions) < 6:
         return None
 
+    # "best_ring" is a post-processing refit on top of auto PCA.
+    use_best_ring = (axis_choice == "best_ring")
+    effective_choice = "auto" if use_best_ring else axis_choice
+
     # ---- Determine axis ----
-    if axis_choice == "auto":
+    if effective_choice == "auto":
         axis, origin = _pca_principal_axis(positions)
     else:
-        local_axis = _AXIS_WORLD.get(axis_choice.lower(), (0.0, 1.0, 0.0))
+        local_axis = _AXIS_WORLD.get(effective_choice.lower(), (0.0, 1.0, 0.0))
         # Transform the local-space axis into world space via the
         # transform node's world matrix.
         try:
@@ -724,7 +788,7 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
         ring_vert_set.update(rd["verts"])
     cap_verts = set(range(len(positions))) - ring_vert_set
 
-    return {
+    result = {
         "axis":           axis,
         "origin":         origin,
         "rings":          ring_details,
@@ -733,6 +797,44 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
         "cap_vert_ids":   cap_verts,
         "ring_tolerance": tol,
     }
+
+    # ---- Best-ring axis refit ---------------------------------------
+    # Find the most circular ring, use its plane normal as the axis and
+    # its plane center as the origin. Ring membership is preserved; only
+    # centers / radii / t are recomputed under the new axis. Per-ring
+    # radii are intentionally kept (taper preserved).
+    if use_best_ring and len(ring_details) >= 1:
+        best_idx = _find_best_ring_index(ring_details, positions, axis)
+        best_verts = ring_details[best_idx]["verts"]
+        best_pts = [positions[i] for i in best_verts]
+        new_axis, new_origin = _pca_plane_normal(best_pts)
+        if _vlen(new_axis) < 0.5:
+            return result  # refit failed; fall back to auto result
+        # Keep the sign consistent with the original axis
+        if _vdot(new_axis, axis) < 0:
+            new_axis = (-new_axis[0], -new_axis[1], -new_axis[2])
+
+        refit_rings = []
+        for rd in ring_details:
+            c, mean_r, med_r, radii, t_mean = \
+                _compute_ring_radii_and_center(
+                    rd["verts"], positions, new_origin, new_axis)
+            refit_rings.append({
+                "verts":    rd["verts"],
+                "t":        t_mean,
+                "center":   c,
+                "mean_r":   mean_r,
+                "median_r": med_r,
+                "radii":    radii,
+            })
+        refit_rings.sort(key=lambda r: r["t"])
+
+        result["axis"]          = new_axis
+        result["origin"]        = new_origin
+        result["rings"]         = refit_rings
+        result["best_ring_idx"] = best_idx
+
+    return result
 
 
 def _axis_name_from_vector(axis, tol=0.05):
@@ -824,13 +926,18 @@ def cleanup_cylinder(analysis, mesh_shape, mode="full", radius_policy="mean"):
                 new_positions[verts[k]] = new_p
 
     # Cap center vertices (vertices not in any detected ring) are snapped
-    # to the axis line at their original t-projection so the n-gon-fan cap
-    # centers sit nicely on the axis.
-    for i in analysis["cap_vert_ids"]:
-        p = positions[i]
-        d = _vsub(p, origin)
-        t = _vdot(d, axis)
-        new_positions[i] = _vadd(origin, _vmul(axis, t))
+    # to the nearest ring's center by axial distance. Using the ring center
+    # (computed from ring vertices only) is more robust than using the
+    # vertex centroid as an axis origin, which can be pulled off-center by
+    # an imperfect cylinder.
+    rings_by_t = analysis["rings"]
+    if rings_by_t:
+        for i in analysis["cap_vert_ids"]:
+            p = positions[i]
+            d = _vsub(p, origin)
+            t = _vdot(d, axis)
+            nearest = min(rings_by_t, key=lambda r: abs(r["t"] - t))
+            new_positions[i] = nearest["center"]
 
     MayaBridge.set_vertex_positions_world(mesh_shape, new_positions)
     return (len(analysis["rings"]), analysis["sides"])
@@ -1102,6 +1209,10 @@ def _cc_build_group(tool_window, parent_layout):
     """Build the Cleanup form group and append to parent_layout."""
     tool_window._cc_target_shape = None   # long path
     tool_window._cc_last_analysis = None  # cached analysis dict
+    # Preview state: when not None, a cleanup has been previewed and
+    # the pre-cleanup vertex positions are kept here so Cancel can revert.
+    tool_window._cc_preview_orig = None    # list of (x,y,z)
+    tool_window._cc_preview_shape = None   # shape path the snapshot belongs to
 
     grp = QtWidgets.QGroupBox()
     grp.setStyleSheet(
@@ -1160,18 +1271,21 @@ def _cc_build_group(tool_window, parent_layout):
     tool_window._cc_rb_x    = QtWidgets.QRadioButton("X")
     tool_window._cc_rb_y    = QtWidgets.QRadioButton("Y")
     tool_window._cc_rb_z    = QtWidgets.QRadioButton("Z")
+    tool_window._cc_rb_best = QtWidgets.QRadioButton(tr("cc_ax_best"))
     tool_window._cc_rb_auto.setChecked(True)
     ax_grp = QtWidgets.QButtonGroup(tool_window)
     for rb in (tool_window._cc_rb_auto, tool_window._cc_rb_x,
-               tool_window._cc_rb_y, tool_window._cc_rb_z):
+               tool_window._cc_rb_y, tool_window._cc_rb_z,
+               tool_window._cc_rb_best):
         rb.setStyleSheet(_RADIO_SS)
         ax_grp.addButton(rb)
         ax_row.addWidget(rb)
     ax_row.addStretch()
     tool_window._cc_ax_group = ax_grp
     for rb in (tool_window._cc_rb_auto, tool_window._cc_rb_x,
-               tool_window._cc_rb_y, tool_window._cc_rb_z):
-        rb.toggled.connect(lambda _c, tw=tool_window: _cc_refresh_preview(tw))
+               tool_window._cc_rb_y, tool_window._cc_rb_z,
+               tool_window._cc_rb_best):
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_on_param_change(tw))
     lo.addLayout(ax_row)
 
     # Mode row
@@ -1188,6 +1302,7 @@ def _cc_build_group(tool_window, parent_layout):
         rb.setStyleSheet(_RADIO_SS)
         mo_grp.addButton(rb)
         mo_row.addWidget(rb)
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_on_param_change(tw))
     mo_row.addStretch()
     tool_window._cc_mode_group = mo_grp
     lo.addLayout(mo_row)
@@ -1206,19 +1321,42 @@ def _cc_build_group(tool_window, parent_layout):
         rb.setStyleSheet(_RADIO_SS)
         rpol_grp.addButton(rb)
         rp_row.addWidget(rb)
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_on_param_change(tw))
     rp_row.addStretch()
     tool_window._cc_rpol_group = rpol_grp
     lo.addLayout(rp_row)
 
-    # Apply button
+    # Preview / Confirm / Cancel row.
+    # Preview is shown initially. After a preview is applied, Preview
+    # hides and (Confirm + Cancel) appear. Cancel reverts the vertex
+    # positions; Confirm keeps them and returns to the Preview state.
     btn_row = QtWidgets.QHBoxLayout()
     btn_row.addStretch()
-    tool_window._cc_btn_apply = _mkbtn(tr("cc_btn_apply"), 28,
-                                       "#2196F3", "#1976D2")
-    tool_window._cc_btn_apply.setFixedWidth(140)
-    tool_window._cc_btn_apply.clicked.connect(
-        lambda: _cc_on_apply(tool_window))
-    btn_row.addWidget(tool_window._cc_btn_apply)
+
+    tool_window._cc_btn_preview = _mkbtn(tr("cc_btn_preview"), 28,
+                                         "#2196F3", "#1976D2")
+    tool_window._cc_btn_preview.setFixedWidth(140)
+    tool_window._cc_btn_preview.clicked.connect(
+        lambda: _cc_on_preview(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_preview)
+
+    tool_window._cc_btn_confirm = _mkbtn(tr("cc_btn_confirm"), 28,
+                                         "#4CAF50", "#388E3C")
+    tool_window._cc_btn_confirm.setFixedWidth(95)
+    tool_window._cc_btn_confirm.clicked.connect(
+        lambda: _cc_on_confirm(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_confirm)
+
+    tool_window._cc_btn_cancel = _mkbtn(tr("cc_btn_cancel"), 28,
+                                        "#757575", "#616161")
+    tool_window._cc_btn_cancel.setFixedWidth(95)
+    tool_window._cc_btn_cancel.clicked.connect(
+        lambda: _cc_on_cancel(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_cancel)
+
+    tool_window._cc_btn_confirm.setVisible(False)
+    tool_window._cc_btn_cancel.setVisible(False)
+
     btn_row.addStretch()
     lo.addLayout(btn_row)
 
@@ -1239,6 +1377,7 @@ def _cc_current_axis_choice(tool_window):
     if tool_window._cc_rb_x.isChecked(): return "x"
     if tool_window._cc_rb_y.isChecked(): return "y"
     if tool_window._cc_rb_z.isChecked(): return "z"
+    if tool_window._cc_rb_best.isChecked(): return "best_ring"
     return "auto"
 
 
@@ -1257,6 +1396,10 @@ def _cc_current_radius_policy(tool_window):
 def _cc_set_target(tool_window):
     if not MAYA_AVAILABLE:
         return
+    # If a preview is in flight, revert it before switching target.
+    if tool_window._cc_preview_orig is not None:
+        _cc_revert_preview(tool_window)
+        _cc_exit_preview_mode(tool_window)
     shapes = MayaBridge.get_selected_meshes()
     if not shapes:
         tool_window._cc_target_shape = None
@@ -1297,7 +1440,49 @@ def _cc_refresh_preview(tool_window):
         sides=analysis["sides"]))
 
 
-def _cc_on_apply(tool_window):
+def _cc_enter_preview_mode(tool_window, orig_positions, shape):
+    tool_window._cc_preview_orig = orig_positions
+    tool_window._cc_preview_shape = shape
+    tool_window._cc_btn_preview.setVisible(False)
+    tool_window._cc_btn_confirm.setVisible(True)
+    tool_window._cc_btn_cancel.setVisible(True)
+
+
+def _cc_exit_preview_mode(tool_window):
+    tool_window._cc_preview_orig = None
+    tool_window._cc_preview_shape = None
+    tool_window._cc_btn_preview.setVisible(True)
+    tool_window._cc_btn_confirm.setVisible(False)
+    tool_window._cc_btn_cancel.setVisible(False)
+
+
+def _cc_revert_preview(tool_window):
+    """Restore the saved pre-preview positions (if any)."""
+    if not MAYA_AVAILABLE:
+        return
+    if not tool_window._cc_preview_orig or not tool_window._cc_preview_shape:
+        return
+    try:
+        cmds.undoInfo(openChunk=True, chunkName="DW_CylinderCleanup_Cancel")
+        try:
+            MayaBridge.set_vertex_positions_world(
+                tool_window._cc_preview_shape, tool_window._cc_preview_orig)
+        finally:
+            cmds.undoInfo(closeChunk=True)
+    except Exception:
+        pass
+
+
+def _cc_on_param_change(tool_window):
+    """Any axis/mode/radius radio change cancels the current preview and
+    refreshes the detected info label."""
+    if tool_window._cc_preview_orig is not None:
+        _cc_revert_preview(tool_window)
+        _cc_exit_preview_mode(tool_window)
+    _cc_refresh_preview(tool_window)
+
+
+def _cc_on_preview(tool_window):
     if not MAYA_AVAILABLE:
         return
     if not tool_window._cc_target_shape:
@@ -1319,6 +1504,13 @@ def _cc_on_apply(tool_window):
     mode = _cc_current_mode(tool_window)
     rpol = _cc_current_radius_policy(tool_window)
 
+    # Snapshot pre-cleanup positions so Cancel can restore them.
+    try:
+        orig = MayaBridge.get_vertex_positions_world(
+            tool_window._cc_target_shape)
+    except Exception:
+        orig = None
+
     cmds.undoInfo(openChunk=True, chunkName="DW_CylinderCleanup")
     try:
         rings_cnt, side_cnt = cleanup_cylinder(
@@ -1329,12 +1521,25 @@ def _cc_on_apply(tool_window):
             "status_cleanup_done",
             axis=ax_name, rings=rings_cnt, sides=side_cnt))
         _cc_refresh_preview(tool_window)
+        if orig is not None:
+            _cc_enter_preview_mode(
+                tool_window, orig, tool_window._cc_target_shape)
     except Exception as e:
         import traceback
         traceback.print_exc()
         _cc_set_status(tool_window, tr("status_error", msg=str(e)))
     finally:
         cmds.undoInfo(closeChunk=True)
+
+
+def _cc_on_confirm(tool_window):
+    _cc_exit_preview_mode(tool_window)
+
+
+def _cc_on_cancel(tool_window):
+    _cc_revert_preview(tool_window)
+    _cc_exit_preview_mode(tool_window)
+    _cc_refresh_preview(tool_window)
 
 
 def _cc_refresh_labels(tool_window):
@@ -1345,13 +1550,16 @@ def _cc_refresh_labels(tool_window):
     tool_window._cc_btn_set.setText(tr("btn_set"))
     tool_window._cc_lbl_axis.setText(tr("cc_lbl_axis"))
     tool_window._cc_rb_auto.setText(tr("cc_ax_auto"))
+    tool_window._cc_rb_best.setText(tr("cc_ax_best"))
     tool_window._cc_lbl_mode.setText(tr("cc_lbl_mode"))
     tool_window._cc_rb_mode_full.setText(tr("cc_mode_full"))
     tool_window._cc_rb_mode_rad.setText(tr("cc_mode_radius"))
     tool_window._cc_lbl_rpol.setText(tr("cc_lbl_radius_avg"))
     tool_window._cc_rb_rpol_mean.setText(tr("cc_radius_mean"))
     tool_window._cc_rb_rpol_med.setText(tr("cc_radius_median"))
-    tool_window._cc_btn_apply.setText(tr("cc_btn_apply"))
+    tool_window._cc_btn_preview.setText(tr("cc_btn_preview"))
+    tool_window._cc_btn_confirm.setText(tr("cc_btn_confirm"))
+    tool_window._cc_btn_cancel.setText(tr("cc_btn_cancel"))
     _cc_refresh_preview(tool_window)
 
 # ---------------------------------------------------------------------------

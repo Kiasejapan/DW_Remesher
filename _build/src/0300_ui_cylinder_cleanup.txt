@@ -10,6 +10,10 @@ def _cc_build_group(tool_window, parent_layout):
     """Build the Cleanup form group and append to parent_layout."""
     tool_window._cc_target_shape = None   # long path
     tool_window._cc_last_analysis = None  # cached analysis dict
+    # Preview state: when not None, a cleanup has been previewed and
+    # the pre-cleanup vertex positions are kept here so Cancel can revert.
+    tool_window._cc_preview_orig = None    # list of (x,y,z)
+    tool_window._cc_preview_shape = None   # shape path the snapshot belongs to
 
     grp = QtWidgets.QGroupBox()
     grp.setStyleSheet(
@@ -68,18 +72,21 @@ def _cc_build_group(tool_window, parent_layout):
     tool_window._cc_rb_x    = QtWidgets.QRadioButton("X")
     tool_window._cc_rb_y    = QtWidgets.QRadioButton("Y")
     tool_window._cc_rb_z    = QtWidgets.QRadioButton("Z")
+    tool_window._cc_rb_best = QtWidgets.QRadioButton(tr("cc_ax_best"))
     tool_window._cc_rb_auto.setChecked(True)
     ax_grp = QtWidgets.QButtonGroup(tool_window)
     for rb in (tool_window._cc_rb_auto, tool_window._cc_rb_x,
-               tool_window._cc_rb_y, tool_window._cc_rb_z):
+               tool_window._cc_rb_y, tool_window._cc_rb_z,
+               tool_window._cc_rb_best):
         rb.setStyleSheet(_RADIO_SS)
         ax_grp.addButton(rb)
         ax_row.addWidget(rb)
     ax_row.addStretch()
     tool_window._cc_ax_group = ax_grp
     for rb in (tool_window._cc_rb_auto, tool_window._cc_rb_x,
-               tool_window._cc_rb_y, tool_window._cc_rb_z):
-        rb.toggled.connect(lambda _c, tw=tool_window: _cc_refresh_preview(tw))
+               tool_window._cc_rb_y, tool_window._cc_rb_z,
+               tool_window._cc_rb_best):
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_on_param_change(tw))
     lo.addLayout(ax_row)
 
     # Mode row
@@ -96,6 +103,7 @@ def _cc_build_group(tool_window, parent_layout):
         rb.setStyleSheet(_RADIO_SS)
         mo_grp.addButton(rb)
         mo_row.addWidget(rb)
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_on_param_change(tw))
     mo_row.addStretch()
     tool_window._cc_mode_group = mo_grp
     lo.addLayout(mo_row)
@@ -114,19 +122,42 @@ def _cc_build_group(tool_window, parent_layout):
         rb.setStyleSheet(_RADIO_SS)
         rpol_grp.addButton(rb)
         rp_row.addWidget(rb)
+        rb.toggled.connect(lambda _c, tw=tool_window: _cc_on_param_change(tw))
     rp_row.addStretch()
     tool_window._cc_rpol_group = rpol_grp
     lo.addLayout(rp_row)
 
-    # Apply button
+    # Preview / Confirm / Cancel row.
+    # Preview is shown initially. After a preview is applied, Preview
+    # hides and (Confirm + Cancel) appear. Cancel reverts the vertex
+    # positions; Confirm keeps them and returns to the Preview state.
     btn_row = QtWidgets.QHBoxLayout()
     btn_row.addStretch()
-    tool_window._cc_btn_apply = _mkbtn(tr("cc_btn_apply"), 28,
-                                       "#2196F3", "#1976D2")
-    tool_window._cc_btn_apply.setFixedWidth(140)
-    tool_window._cc_btn_apply.clicked.connect(
-        lambda: _cc_on_apply(tool_window))
-    btn_row.addWidget(tool_window._cc_btn_apply)
+
+    tool_window._cc_btn_preview = _mkbtn(tr("cc_btn_preview"), 28,
+                                         "#2196F3", "#1976D2")
+    tool_window._cc_btn_preview.setFixedWidth(140)
+    tool_window._cc_btn_preview.clicked.connect(
+        lambda: _cc_on_preview(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_preview)
+
+    tool_window._cc_btn_confirm = _mkbtn(tr("cc_btn_confirm"), 28,
+                                         "#4CAF50", "#388E3C")
+    tool_window._cc_btn_confirm.setFixedWidth(95)
+    tool_window._cc_btn_confirm.clicked.connect(
+        lambda: _cc_on_confirm(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_confirm)
+
+    tool_window._cc_btn_cancel = _mkbtn(tr("cc_btn_cancel"), 28,
+                                        "#757575", "#616161")
+    tool_window._cc_btn_cancel.setFixedWidth(95)
+    tool_window._cc_btn_cancel.clicked.connect(
+        lambda: _cc_on_cancel(tool_window))
+    btn_row.addWidget(tool_window._cc_btn_cancel)
+
+    tool_window._cc_btn_confirm.setVisible(False)
+    tool_window._cc_btn_cancel.setVisible(False)
+
     btn_row.addStretch()
     lo.addLayout(btn_row)
 
@@ -147,6 +178,7 @@ def _cc_current_axis_choice(tool_window):
     if tool_window._cc_rb_x.isChecked(): return "x"
     if tool_window._cc_rb_y.isChecked(): return "y"
     if tool_window._cc_rb_z.isChecked(): return "z"
+    if tool_window._cc_rb_best.isChecked(): return "best_ring"
     return "auto"
 
 
@@ -165,6 +197,10 @@ def _cc_current_radius_policy(tool_window):
 def _cc_set_target(tool_window):
     if not MAYA_AVAILABLE:
         return
+    # If a preview is in flight, revert it before switching target.
+    if tool_window._cc_preview_orig is not None:
+        _cc_revert_preview(tool_window)
+        _cc_exit_preview_mode(tool_window)
     shapes = MayaBridge.get_selected_meshes()
     if not shapes:
         tool_window._cc_target_shape = None
@@ -205,7 +241,49 @@ def _cc_refresh_preview(tool_window):
         sides=analysis["sides"]))
 
 
-def _cc_on_apply(tool_window):
+def _cc_enter_preview_mode(tool_window, orig_positions, shape):
+    tool_window._cc_preview_orig = orig_positions
+    tool_window._cc_preview_shape = shape
+    tool_window._cc_btn_preview.setVisible(False)
+    tool_window._cc_btn_confirm.setVisible(True)
+    tool_window._cc_btn_cancel.setVisible(True)
+
+
+def _cc_exit_preview_mode(tool_window):
+    tool_window._cc_preview_orig = None
+    tool_window._cc_preview_shape = None
+    tool_window._cc_btn_preview.setVisible(True)
+    tool_window._cc_btn_confirm.setVisible(False)
+    tool_window._cc_btn_cancel.setVisible(False)
+
+
+def _cc_revert_preview(tool_window):
+    """Restore the saved pre-preview positions (if any)."""
+    if not MAYA_AVAILABLE:
+        return
+    if not tool_window._cc_preview_orig or not tool_window._cc_preview_shape:
+        return
+    try:
+        cmds.undoInfo(openChunk=True, chunkName="DW_CylinderCleanup_Cancel")
+        try:
+            MayaBridge.set_vertex_positions_world(
+                tool_window._cc_preview_shape, tool_window._cc_preview_orig)
+        finally:
+            cmds.undoInfo(closeChunk=True)
+    except Exception:
+        pass
+
+
+def _cc_on_param_change(tool_window):
+    """Any axis/mode/radius radio change cancels the current preview and
+    refreshes the detected info label."""
+    if tool_window._cc_preview_orig is not None:
+        _cc_revert_preview(tool_window)
+        _cc_exit_preview_mode(tool_window)
+    _cc_refresh_preview(tool_window)
+
+
+def _cc_on_preview(tool_window):
     if not MAYA_AVAILABLE:
         return
     if not tool_window._cc_target_shape:
@@ -227,6 +305,13 @@ def _cc_on_apply(tool_window):
     mode = _cc_current_mode(tool_window)
     rpol = _cc_current_radius_policy(tool_window)
 
+    # Snapshot pre-cleanup positions so Cancel can restore them.
+    try:
+        orig = MayaBridge.get_vertex_positions_world(
+            tool_window._cc_target_shape)
+    except Exception:
+        orig = None
+
     cmds.undoInfo(openChunk=True, chunkName="DW_CylinderCleanup")
     try:
         rings_cnt, side_cnt = cleanup_cylinder(
@@ -237,12 +322,25 @@ def _cc_on_apply(tool_window):
             "status_cleanup_done",
             axis=ax_name, rings=rings_cnt, sides=side_cnt))
         _cc_refresh_preview(tool_window)
+        if orig is not None:
+            _cc_enter_preview_mode(
+                tool_window, orig, tool_window._cc_target_shape)
     except Exception as e:
         import traceback
         traceback.print_exc()
         _cc_set_status(tool_window, tr("status_error", msg=str(e)))
     finally:
         cmds.undoInfo(closeChunk=True)
+
+
+def _cc_on_confirm(tool_window):
+    _cc_exit_preview_mode(tool_window)
+
+
+def _cc_on_cancel(tool_window):
+    _cc_revert_preview(tool_window)
+    _cc_exit_preview_mode(tool_window)
+    _cc_refresh_preview(tool_window)
 
 
 def _cc_refresh_labels(tool_window):
@@ -253,12 +351,15 @@ def _cc_refresh_labels(tool_window):
     tool_window._cc_btn_set.setText(tr("btn_set"))
     tool_window._cc_lbl_axis.setText(tr("cc_lbl_axis"))
     tool_window._cc_rb_auto.setText(tr("cc_ax_auto"))
+    tool_window._cc_rb_best.setText(tr("cc_ax_best"))
     tool_window._cc_lbl_mode.setText(tr("cc_lbl_mode"))
     tool_window._cc_rb_mode_full.setText(tr("cc_mode_full"))
     tool_window._cc_rb_mode_rad.setText(tr("cc_mode_radius"))
     tool_window._cc_lbl_rpol.setText(tr("cc_lbl_radius_avg"))
     tool_window._cc_rb_rpol_mean.setText(tr("cc_radius_mean"))
     tool_window._cc_rb_rpol_med.setText(tr("cc_radius_median"))
-    tool_window._cc_btn_apply.setText(tr("cc_btn_apply"))
+    tool_window._cc_btn_preview.setText(tr("cc_btn_preview"))
+    tool_window._cc_btn_confirm.setText(tr("cc_btn_confirm"))
+    tool_window._cc_btn_cancel.setText(tr("cc_btn_cancel"))
     _cc_refresh_preview(tool_window)
 

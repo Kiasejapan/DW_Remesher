@@ -16,6 +16,39 @@ _AXIS_WORLD = {
 }
 
 
+def _ring_circularity(ring_verts, positions, center, axis):
+    """Coefficient of variation of radii (std / mean).
+    Lower = more circular; 0 = perfect circle. inf if mean_r ~ 0."""
+    radii = []
+    for i in ring_verts:
+        p = positions[i]
+        d = _vsub(p, center)
+        t_comp = _vdot(d, axis)
+        perp = _vsub(d, _vmul(axis, t_comp))
+        radii.append(_vlen(perp))
+    n = len(radii)
+    if n == 0:
+        return float("inf")
+    mean_r = sum(radii) / n
+    if mean_r < _EPS:
+        return float("inf")
+    var = sum((r - mean_r) ** 2 for r in radii) / n
+    return math.sqrt(var) / mean_r
+
+
+def _find_best_ring_index(rings, positions, axis):
+    """Return index of the ring with lowest radii coefficient-of-variation."""
+    best_idx = 0
+    best_score = float("inf")
+    for i, ring in enumerate(rings):
+        score = _ring_circularity(
+            ring["verts"], positions, ring["center"], axis)
+        if score < best_score:
+            best_score = score
+            best_idx = i
+    return best_idx
+
+
 def _compute_ring_radii_and_center(vert_ids, positions, axis_origin, axis_dir):
     """Helper: for a set of vertex indices assumed to lie in a ring around
     axis, return (center_point_on_axis, mean_radius, median_radius, radii_list)."""
@@ -42,7 +75,10 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
     """
     Analyze a mesh as a cylinder.
 
-    axis_choice : "auto" | "x" | "y" | "z"   (local-space axis selection)
+    axis_choice : "auto" | "x" | "y" | "z" | "best_ring"
+        "best_ring" performs an auto analysis first, then refits the axis
+        using the most circular ring's fitted plane (normal = axis,
+        center = origin). Per-ring radii are preserved (taper-safe).
 
     Returns a dict:
         {
@@ -54,6 +90,7 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
           "positions":  [(x,y,z) ...] per vertex, world space,
           "cap_vert_ids": set(int) -- vertices that don't fit any ring,
           "ring_tolerance": float used for clustering,
+          "best_ring_idx": int, present only if axis_choice=="best_ring",
         }
     or None if the mesh can't be analyzed as a cylinder.
     """
@@ -64,11 +101,15 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
     if len(positions) < 6:
         return None
 
+    # "best_ring" is a post-processing refit on top of auto PCA.
+    use_best_ring = (axis_choice == "best_ring")
+    effective_choice = "auto" if use_best_ring else axis_choice
+
     # ---- Determine axis ----
-    if axis_choice == "auto":
+    if effective_choice == "auto":
         axis, origin = _pca_principal_axis(positions)
     else:
-        local_axis = _AXIS_WORLD.get(axis_choice.lower(), (0.0, 1.0, 0.0))
+        local_axis = _AXIS_WORLD.get(effective_choice.lower(), (0.0, 1.0, 0.0))
         # Transform the local-space axis into world space via the
         # transform node's world matrix.
         try:
@@ -155,7 +196,7 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
         ring_vert_set.update(rd["verts"])
     cap_verts = set(range(len(positions))) - ring_vert_set
 
-    return {
+    result = {
         "axis":           axis,
         "origin":         origin,
         "rings":          ring_details,
@@ -164,6 +205,44 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
         "cap_vert_ids":   cap_verts,
         "ring_tolerance": tol,
     }
+
+    # ---- Best-ring axis refit ---------------------------------------
+    # Find the most circular ring, use its plane normal as the axis and
+    # its plane center as the origin. Ring membership is preserved; only
+    # centers / radii / t are recomputed under the new axis. Per-ring
+    # radii are intentionally kept (taper preserved).
+    if use_best_ring and len(ring_details) >= 1:
+        best_idx = _find_best_ring_index(ring_details, positions, axis)
+        best_verts = ring_details[best_idx]["verts"]
+        best_pts = [positions[i] for i in best_verts]
+        new_axis, new_origin = _pca_plane_normal(best_pts)
+        if _vlen(new_axis) < 0.5:
+            return result  # refit failed; fall back to auto result
+        # Keep the sign consistent with the original axis
+        if _vdot(new_axis, axis) < 0:
+            new_axis = (-new_axis[0], -new_axis[1], -new_axis[2])
+
+        refit_rings = []
+        for rd in ring_details:
+            c, mean_r, med_r, radii, t_mean = \
+                _compute_ring_radii_and_center(
+                    rd["verts"], positions, new_origin, new_axis)
+            refit_rings.append({
+                "verts":    rd["verts"],
+                "t":        t_mean,
+                "center":   c,
+                "mean_r":   mean_r,
+                "median_r": med_r,
+                "radii":    radii,
+            })
+        refit_rings.sort(key=lambda r: r["t"])
+
+        result["axis"]          = new_axis
+        result["origin"]        = new_origin
+        result["rings"]         = refit_rings
+        result["best_ring_idx"] = best_idx
+
+    return result
 
 
 def _axis_name_from_vector(axis, tol=0.05):

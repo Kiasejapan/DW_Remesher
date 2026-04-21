@@ -125,13 +125,9 @@ def _jacobi_eigen_3x3(A):
     return sorted_evals, sorted_v
 
 
-def _pca_principal_axis(points):
-    """
-    Returns (axis_unit_vector, centroid) for a list of 3D points.
-    The axis is the first principal component (largest variance).
-    """
+def _covariance_and_centroid(points):
+    """Shared: return (3x3 covariance matrix, centroid) for points."""
     c = _centroid(points)
-    # Build covariance matrix
     sxx = syy = szz = sxy = sxz = syz = 0.0
     for p in points:
         dx = p[0] - c[0]
@@ -147,10 +143,32 @@ def _pca_principal_axis(points):
     cov = [[sxx / n, sxy / n, sxz / n],
            [sxy / n, syy / n, syz / n],
            [sxz / n, syz / n, szz / n]]
+    return cov, c
+
+
+def _pca_principal_axis(points):
+    """
+    Returns (axis_unit_vector, centroid) for a list of 3D points.
+    The axis is the first principal component (largest variance).
+    """
+    cov, c = _covariance_and_centroid(points)
     evals, evecs = _jacobi_eigen_3x3(cov)
-    # First column of evecs is the principal axis
+    # First column of evecs is the principal axis (largest eigenvalue)
     axis = (evecs[0][0], evecs[1][0], evecs[2][0])
     return _vnorm(axis), c
+
+
+def _pca_plane_normal(points):
+    """
+    Returns (normal_unit_vector, centroid) for points approximately
+    lying on a plane. The normal is the smallest principal component
+    (minimum variance direction).
+    """
+    cov, c = _covariance_and_centroid(points)
+    evals, evecs = _jacobi_eigen_3x3(cov)
+    # Third column = smallest eigenvalue = plane normal
+    normal = (evecs[0][2], evecs[1][2], evecs[2][2])
+    return _vnorm(normal), c
 
 
 def _project_onto_axis(point, axis_origin, axis_dir):

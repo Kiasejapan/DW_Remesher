@@ -76,13 +76,18 @@ def cleanup_cylinder(analysis, mesh_shape, mode="full", radius_policy="mean"):
                 new_positions[verts[k]] = new_p
 
     # Cap center vertices (vertices not in any detected ring) are snapped
-    # to the axis line at their original t-projection so the n-gon-fan cap
-    # centers sit nicely on the axis.
-    for i in analysis["cap_vert_ids"]:
-        p = positions[i]
-        d = _vsub(p, origin)
-        t = _vdot(d, axis)
-        new_positions[i] = _vadd(origin, _vmul(axis, t))
+    # to the nearest ring's center by axial distance. Using the ring center
+    # (computed from ring vertices only) is more robust than using the
+    # vertex centroid as an axis origin, which can be pulled off-center by
+    # an imperfect cylinder.
+    rings_by_t = analysis["rings"]
+    if rings_by_t:
+        for i in analysis["cap_vert_ids"]:
+            p = positions[i]
+            d = _vsub(p, origin)
+            t = _vdot(d, axis)
+            nearest = min(rings_by_t, key=lambda r: abs(r["t"] - t))
+            new_positions[i] = nearest["center"]
 
     MayaBridge.set_vertex_positions_world(mesh_shape, new_positions)
     return (len(analysis["rings"]), analysis["sides"])

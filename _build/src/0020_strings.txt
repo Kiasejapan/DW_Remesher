@@ -28,6 +28,8 @@ _STRINGS = {
     "cc_lbl_target":        {"en": "Target:",                       "jp": u"\u5bfe\u8c61:"},
     "cc_lbl_axis":          {"en": "Axis:",                         "jp": u"\u8ef8:"},
     "cc_ax_auto":           {"en": "Auto",                          "jp": u"\u81ea\u52d5"},
+    "cc_ax_best":           {"en": "Best ring",
+                             "jp": u"\u6700\u826f\u30ea\u30f3\u30b0"},
     "cc_lbl_mode":          {"en": "Mode:",                         "jp": u"\u30e2\u30fc\u30c9:"},
     "cc_mode_full":         {"en": "Round && Straighten",
                              "jp": u"\u6574\u5217\uff0b\u5747\u7b49\u5316"},
@@ -38,6 +40,9 @@ _STRINGS = {
     "cc_radius_mean":       {"en": "Mean",                          "jp": u"\u5e73\u5747"},
     "cc_radius_median":     {"en": "Median",                        "jp": u"\u4e2d\u592e\u5024"},
     "cc_btn_apply":         {"en": "Cleanup",                       "jp": u"\u6574\u5f62"},
+    "cc_btn_preview":       {"en": "Preview",                       "jp": u"\u30d7\u30ec\u30d3\u30e5\u30fc"},
+    "cc_btn_confirm":       {"en": "Confirm",                       "jp": u"\u78ba\u5b9a"},
+    "cc_btn_cancel":        {"en": "Cancel",                        "jp": u"\u53d6\u6d88"},
     "cc_info_detected":     {"en": "Axis: {axis}  Rings: {rings}  Sides: {sides}",
                              "jp": u"\u8ef8: {axis}  \u30ea\u30f3\u30b0\u6570: {rings}  \u89d2\u6570: {sides}"},
 
