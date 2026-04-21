@@ -11,7 +11,7 @@ import math
 
 # Version is rewritten by build.py at every build
 # Format: YYYY.MM.DD.HHMM
-VERSION = "2026.04.21.1614"
+VERSION = "2026.04.21.1632"
 
 # GitHub raw file URL for auto-update
 _GITHUB_RAW_URL = "https://raw.githubusercontent.com/Kiasejapan/DW_Remesher/main/DW_Remesher.py"
@@ -721,21 +721,42 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
     if _vlen(axis) < 0.5:
         return None
 
-    # ---- Project onto axis, find extent ----
-    t_values = [_project_onto_axis(p, origin, axis) for p in positions]
+    # ---- Project onto axis, compute perpendicular distances ----
+    t_values = []
+    perp_dists = []
+    for p in positions:
+        d = _vsub(p, origin)
+        t = _vdot(d, axis)
+        perp = _vsub(d, _vmul(axis, t))
+        t_values.append(t)
+        perp_dists.append(_vlen(perp))
+
     t_min = min(t_values)
     t_max = max(t_values)
     extent = t_max - t_min
     if extent < _EPS:
         return None
 
-    # ---- Cluster verts into rings by axis position ----
-    # Use an adaptive tolerance: start at 0.5% of extent, grow if we don't
-    # produce enough multi-vertex rings (mesh might be very dense along axis).
-    tol = max(extent * 0.005, 1e-6)
+    max_perp = max(perp_dists) if perp_dists else 0.0
+    if max_perp < _EPS:
+        return None
 
-    # Sort vertex indices by t
-    order = sorted(range(len(positions)), key=lambda i: t_values[i])
+    # ---- Exclude near-axis vertices from ring clustering --------------
+    # Cap center vertices (and similar singular verts) sit at or near
+    # the cylinder axis. If we let them join a ring cluster, the ring's
+    # size becomes inconsistent with other rings and downstream "match
+    # the mode" filtering drops valid rings. Excluding them up front
+    # makes detection robust regardless of whether the cap center's
+    # t happens to coincide with an adjacent ring or not.
+    perp_threshold = max_perp * 0.25
+    cluster_ids = [i for i in range(len(positions))
+                   if perp_dists[i] >= perp_threshold]
+    if len(cluster_ids) < 6:
+        return None
+
+    # ---- Cluster candidate verts into rings by axis position ----
+    tol = max(extent * 0.005, 1e-6)
+    order = sorted(cluster_ids, key=lambda i: t_values[i])
     rings = [[order[0]]]
     ref_t = t_values[order[0]]
     for idx in order[1:]:
@@ -743,7 +764,6 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
             rings[-1].append(idx)
         else:
             rings.append([idx])
-        # Always update ref to the latest entry so drift works
         ref_t = t_values[idx]
 
     # Keep rings of size >= 3 (can't define a circle with fewer)
@@ -753,15 +773,19 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
 
     # Detect side count = mode of ring sizes
     sizes = [len(r) for r in side_rings]
-    # Mode
     size_counts = {}
     for s in sizes:
         size_counts[s] = size_counts.get(s, 0) + 1
     mode_sides = max(size_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
-    # Keep only rings whose size matches mode (ignore odd-sized rings,
-    # those are likely noise / caps with subdivided fans)
+    # Tolerant ring acceptance: prefer rings matching the mode exactly,
+    # but fall back to mode +/-1 if that yields too few rings. Handles
+    # meshes where one cap-adjacent ring has slightly different vert
+    # count due to topology quirks.
     valid_rings = [r for r in side_rings if len(r) == mode_sides]
+    if len(valid_rings) < 2:
+        valid_rings = [r for r in side_rings
+                       if abs(len(r) - mode_sides) <= 1]
     if len(valid_rings) < 2:
         return None
 
@@ -779,10 +803,9 @@ def analyze_cylinder(mesh_shape, axis_choice="auto"):
             "radii":    radii,
         })
 
-    # Sort rings ascending by t
     ring_details.sort(key=lambda rd: rd["t"])
 
-    # Collect cap verts (those not in any valid ring)
+    # cap_verts = everything that wasn't used as a ring vertex
     ring_vert_set = set()
     for rd in ring_details:
         ring_vert_set.update(rd["verts"])
